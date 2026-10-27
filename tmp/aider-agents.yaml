@@ -1,0 +1,6 @@
+agents:
+  - name: aider
+    kind: tool
+    match:
+      interpreter: /usr/bin/python3
+      argv_contains: "aider"
