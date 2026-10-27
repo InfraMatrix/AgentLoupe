@@ -1,0 +1,33 @@
+# AgentLoupe example configuration. Copy to /etc/agentloupe/agents.yaml
+# (or point --config at it) and edit. The loader re-resolves paths on
+# inotify events in the parent directory, so package-manager upgrades
+# (write temp + rename over) are picked up without a restart.
+agents:
+  # A locally launched CLI agent: matched by the inode of its binary.
+  - name: claude-code
+    kind: tool
+    match:
+      exec_path: /usr/local/bin/claude
+
+  # An interpreted agent: the interpreter binary is a candidate; the
+  # session is provisional until argv contains the marker, then confirmed
+  # (or rejected on timeout — timeout is a reject).
+  - name: aider
+    kind: tool
+    match:
+      interpreter: /usr/bin/python3
+      argv_contains: aider
+
+  # A deployed service: everything in this cgroup v2 subtree.
+  - name: my-agent-service
+    kind: service
+    match:
+      cgroup: /system.slice/my-agent.service
+
+  # Kubernetes: resolved by scanning cgroupfs for the pod UID token
+  # (dashes and underscores forms). For production, resolve via the k8s
+  # API instead — this heuristic is a dev-mode convenience.
+  - name: agent-pod
+    kind: service
+    match:
+      k8s_label: app=my-agent
