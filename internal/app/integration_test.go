@@ -29,15 +29,18 @@ import (
 
 type capturedEvent struct {
 	Raw       string
-	Type      string `json:"type"`
-	SessionID uint64 `json:"session_id"`
-	AgentName string `json:"agent_name"`
-	PID       uint32 `json:"pid"`
-	Comm      string `json:"comm"`
-	Filename  string `json:"filename"`
-	Path      string `json:"path"`
-	Daddr     string `json:"daddr"`
-	Dport     uint16 `json:"dport"`
+	Type      string  `json:"type"`
+	SessionID uint64  `json:"session_id"`
+	AgentName string  `json:"agent_name"`
+	PID       uint32  `json:"pid"`
+	Comm      string  `json:"comm"`
+	Filename  string  `json:"filename"`
+	Path      string  `json:"path"`
+	Daddr     string  `json:"daddr"`
+	Dport     uint16  `json:"dport"`
+	Protocol  uint8   `json:"protocol"`
+	DNS       bool    `json:"dns"`
+	Duration  *uint64 `json:"duration_ms"`
 }
 
 func readEvents(path string) []capturedEvent {
@@ -244,6 +247,19 @@ func TestIntegrationLoaderObserveOnly(t *testing.T) {
 	}()
 	listenPort := uint16(listener.Addr().(*net.TCPAddr).Port)
 
+	// UDP listener: the workload connects (SOCK_DGRAM) to it; Loupe must
+	// report it via sys_enter_connect even with TCP fexit attached.
+	udpAddr, err := net.ResolveUDPAddr("udp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	udpConn, err := net.ListenUDP("udp", udpAddr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer udpConn.Close()
+	udpPort := uint16(udpConn.LocalAddr().(*net.UDPAddr).Port)
+
 	// Baseline kernel-object state, for the post-shutdown leak check.
 	baseProgs, _ := programSnapshot()
 	baseMaps, _ := mapSnapshot()
@@ -255,10 +271,11 @@ func TestIntegrationLoaderObserveOnly(t *testing.T) {
 	loaderDone := make(chan struct{})
 	go func() {
 		runResult = Run(ctx, Options{
-			BPFObject:     bpfObject,
-			ConfigPath:    configPath,
-			Output:        outFile,
-			StatsInterval: 0,
+			BPFObject:            bpfObject,
+			ConfigPath:           configPath,
+			Output:               outFile,
+			StatsInterval:        0,
+			EnableSyscallSummary: true,
 		})
 		close(loaderDone)
 	}()
@@ -283,7 +300,11 @@ with open(%q, "w") as f:
     f.write(str(p.pid))
 s = socket.create_connection(("127.0.0.1", %d), timeout=5)
 s.close()
-`, token, targetFile, trueBin, pidFile, listenPort)
+u = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+u.connect(("127.0.0.1", %d))
+u.send(b"x")
+u.close()
+`, token, targetFile, trueBin, pidFile, listenPort, udpPort)
 
 	type workloadResult struct {
 		pyPID, truePID int
@@ -317,7 +338,7 @@ s.close()
 				trueExec = ev
 			case ev.Type == "file_open" && ev.PID == uint32(w.pyPID) && ev.Path == targetFile:
 				fileOpen = ev
-			case ev.Type == "net_connect" && ev.PID == uint32(w.pyPID):
+			case ev.Type == "net_connect" && ev.PID == uint32(w.pyPID) && ev.Protocol != 17:
 				connect = ev
 			}
 		}
@@ -413,6 +434,30 @@ FOUND:
 		fail("net_connect agent_name = %q, want %q", connect.AgentName, agentName)
 	}
 
+	// UDP connect must be visible (protocol 17) alongside TCP.
+	var udpEv *capturedEvent
+	var closeEv *capturedEvent
+	for i := range events {
+		ev := &events[i]
+		if ev.Type == "net_connect" && ev.PID == uint32(lastWorkload.pyPID) && ev.Protocol == 17 {
+			udpEv = ev
+		}
+		if ev.Type == "file_close" && ev.PID == uint32(lastWorkload.pyPID) {
+			closeEv = ev
+		}
+	}
+	if udpEv == nil {
+		fail("missing UDP net_connect (protocol=17) to 127.0.0.1:%d", udpPort)
+	}
+	if udpEv.Dport != udpPort {
+		fail("UDP net_connect dport = %d, want %d", udpEv.Dport, udpPort)
+	}
+	// file_close with duration_ms is LSM-mode only; on the tracepoint
+	// fallback there is no close hook, so only assert when present.
+	if closeEv != nil && closeEv.Duration == nil {
+		fail("file_close present but duration_ms missing: %s", closeEv.Raw)
+	}
+
 	if pyExec.SessionID == 0 || fileOpen.SessionID != pyExec.SessionID ||
 		connect.SessionID != pyExec.SessionID || trueExec.SessionID == 0 {
 		fail("session IDs disagree: exec=%d file_open=%d connect=%d child_exec=%d",
@@ -477,6 +522,22 @@ FOUND:
 	}
 	if totalEmitted == 0 {
 		fail("stats map reports zero emitted events despite captured events (counter readback broken?)")
+	}
+
+	// Syscall summary (--enable-syscall-summary) must have counted
+	// something for the workload session.
+	if scMap, err := newMapByName("syscall_counts", baseMaps); err == nil {
+		it := scMap.Iterate()
+		var k [16]byte
+		var v uint64
+		n := 0
+		for it.Next(&k, &v) {
+			n++
+		}
+		scMap.Close()
+		if n == 0 {
+			fail("syscall_counts map empty despite --enable-syscall-summary")
+		}
 	}
 
 	// --- shutdown and leak check -------------------------------------------------

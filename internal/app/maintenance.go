@@ -43,19 +43,31 @@ func possibleCPUs() int {
 func maintenance(ctx context.Context, l *Loader, proc *Processor, o Options, logf func(string, ...any)) {
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
-	var lastStats, lastSweep, lastFlush time.Time
+	var lastStats, lastSweep, lastFlush, lastAdopt time.Time
 	for {
 		select {
 		case <-ctx.Done():
 			// Final stats snapshot on shutdown so dev runs always
 			// report whether anything was dropped.
 			printStats(l, logf)
+			dumpSyscallCounts(l, logf)
+			if n := proc.DroppedFiltered(); n > 0 {
+				logf("filter: dropped %d file events via --drop-path-prefix", n)
+			}
 			return
 		case now := <-ticker.C:
 			proc.Expire()
+			l.sampleTrackedCPU()
+			if now.Sub(lastAdopt) >= 5*time.Second {
+				lastAdopt = now
+				if cfg := l.Rules(); cfg != nil {
+					l.adoptRunning(cfg, logf)
+				}
+			}
 			if o.StatsInterval > 0 && now.Sub(lastStats) >= o.StatsInterval {
 				lastStats = now
 				printStats(l, logf)
+				dumpSyscallCounts(l, logf)
 			}
 			if now.Sub(lastSweep) >= 30*time.Second {
 				lastSweep = now
@@ -164,7 +176,10 @@ func sweep(l *Loader, proc *Processor, logf func(string, ...any)) {
 	for _, s := range retire {
 		key := s
 		_ = sessions.Delete(&key)
+		l.mu.Lock()
 		delete(l.metaCache, s)
+		delete(l.cpuCache, s)
+		l.mu.Unlock()
 		proc.Forget(s)
 	}
 	if len(retire) > 0 {
@@ -179,12 +194,12 @@ func flushLongLived(l *Loader, proc *Processor) {
 	}
 	it := m.Iterate()
 	var filePtr uint64
-	var raw [312]byte
+	var raw [568]byte
 	for it.Next(&filePtr, &raw) {
-		sid := binary.LittleEndian.Uint64(raw[256:264])
-		readB := binary.LittleEndian.Uint64(raw[264:272])
-		writeB := binary.LittleEndian.Uint64(raw[272:280])
-		openTS := binary.LittleEndian.Uint64(raw[280:288])
+		sid := binary.LittleEndian.Uint64(raw[512:520])
+		readB := binary.LittleEndian.Uint64(raw[520:528])
+		writeB := binary.LittleEndian.Uint64(raw[528:536])
+		openTS := binary.LittleEndian.Uint64(raw[536:544])
 		key := flushKey{filePtr: filePtr, openTSNS: openTS}
 		last := l.flushState[key]
 		if readB == last.read && writeB == last.write && last != (flushVal{}) {
@@ -192,15 +207,15 @@ func flushLongLived(l *Loader, proc *Processor) {
 		}
 		d := &Decoded{
 			Type: 9, TsNS: monotonicNS(), SessionID: sid,
-			Tgid: binary.LittleEndian.Uint32(raw[296:300]),
+			Tgid: binary.LittleEndian.Uint32(raw[552:556]),
 			Fields: map[string]any{
-				"path":        cstr(raw[0:256]),
+				"path":        cstr(raw[0:512]),
 				"file_ptr":    fmt.Sprintf("%#x", filePtr),
 				"read_bytes":  readB - last.read,
 				"write_bytes": writeB - last.write,
 				"read_total":  readB,
 				"write_total": writeB,
-				"path_src":    pathSrcNames[raw[308]],
+				"path_src":    pathSrcNames[raw[564]],
 				"partial":     true,
 			},
 		}

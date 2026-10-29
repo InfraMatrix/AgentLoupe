@@ -17,8 +17,8 @@ import (
 // Layout mirrors bpf/agentloupe.h exactly (see abi_layout_test.go, which
 // fails if these sizes/offsets drift from the C structs):
 //   event_hdr 72 B, then one fixed-size payload per type.
-//   ev_exec 792, ev_fork 8, ev_exit 8, ev_file_open 280, ev_file_unlink 264,
-//   ev_file_rename 520, ev_file_chmod 272, ev_file_close 296, ev_net_connect 48.
+//   ev_exec 1560, ev_fork 8, ev_exit 8, ev_file_open 536, ev_file_unlink 520,
+//   ev_file_rename 1032, ev_file_chmod 528, ev_file_close 552, ev_net_connect 48.
 
 func putStr(dst []byte, s string) { copy(dst, s) }
 
@@ -27,7 +27,7 @@ func buildRecord(typ uint16, flags uint16, payload []byte) []byte {
 	raw := make([]byte, 72+len(payload))
 	binary.LittleEndian.PutUint16(raw[0:2], typ)
 	binary.LittleEndian.PutUint16(raw[2:4], uint16(len(raw))) // hdr.size
-	binary.LittleEndian.PutUint16(raw[4:6], 1)                // ABI version
+	binary.LittleEndian.PutUint16(raw[4:6], 2)                // ABI version
 	binary.LittleEndian.PutUint16(raw[6:8], flags)
 	binary.LittleEndian.PutUint64(raw[8:16], 123456789) // ts_ns
 	binary.LittleEndian.PutUint64(raw[16:24], 42)       // session_id
@@ -43,25 +43,25 @@ func buildRecord(typ uint16, flags uint16, payload []byte) []byte {
 }
 
 func execPayload() []byte {
-	p := make([]byte, 792)
-	putStr(p[0:256], "/usr/bin/python3")
-	putStr(p[256:512], "/home/user/proj")
-	putStr(p[512:768], "python3\x00-m\x00aider\x00")
-	// p[768:772] argc is left 0 by the kernel; the decoder counts argv.
-	binary.LittleEndian.PutUint32(p[772:776], 1000) // audit_loginuid
-	binary.LittleEndian.PutUint32(p[776:780], 5)    // audit_sessionid
-	p[784] = 1                                      // filename_src = d_path
-	p[785] = 2                                      // cwd_src = dentry_walk
+	p := make([]byte, 1560)
+	putStr(p[0:512], "/usr/bin/python3")
+	putStr(p[512:1024], "/home/user/proj")
+	putStr(p[1024:1536], "python3\x00-m\x00aider\x00")
+	// p[1536:1540] argc is left 0 by the kernel; the decoder counts argv.
+	binary.LittleEndian.PutUint32(p[1540:1544], 1000) // audit_loginuid
+	binary.LittleEndian.PutUint32(p[1544:1548], 5)    // audit_sessionid
+	p[1552] = 1                                       // filename_src = d_path
+	p[1553] = 2                                       // cwd_src = dentry_walk
 	return p
 }
 
 func fileOpenPayload() []byte {
-	p := make([]byte, 280)
-	putStr(p[0:256], "/tmp/x")
-	binary.LittleEndian.PutUint64(p[256:264], 0xffff888012345678) // file_ptr
-	binary.LittleEndian.PutUint32(p[264:268], 0o102)              // open_flags (O_CREAT|O_WRONLY)
-	binary.LittleEndian.PutUint32(p[268:272], 0)                  // result
-	p[272] = 1                                                    // path_src = d_path
+	p := make([]byte, 536)
+	putStr(p[0:512], "/tmp/x")
+	binary.LittleEndian.PutUint64(p[512:520], 0xffff888012345678) // file_ptr
+	binary.LittleEndian.PutUint32(p[520:524], 0o102)              // open_flags (O_CREAT|O_WRONLY)
+	binary.LittleEndian.PutUint32(p[524:528], 0)                  // result
+	p[528] = 1                                                    // path_src = d_path
 	return p
 }
 
@@ -142,7 +142,7 @@ func TestDecodeValidEvents(t *testing.T) {
 			name: "exec with loginuid unset omits the field",
 			raw: func() []byte {
 				p := execPayload()
-				binary.LittleEndian.PutUint32(p[772:776], 4294967295)
+				binary.LittleEndian.PutUint32(p[1540:1544], 4294967295)
 				return buildRecord(1, 0, p)
 			}(),
 			check: func(t *testing.T, d *Decoded) { assertNoField(t, d, "loginuid") },
@@ -151,7 +151,7 @@ func TestDecodeValidEvents(t *testing.T) {
 			name: "exec with empty argv",
 			raw: func() []byte {
 				p := execPayload()
-				for i := 512; i < 768; i++ {
+				for i := 1024; i < 1536; i++ {
 					p[i] = 0
 				}
 				return buildRecord(1, 0, p)
@@ -200,7 +200,7 @@ func TestDecodeValidEvents(t *testing.T) {
 			name: "file_open with error result",
 			raw: func() []byte {
 				p := fileOpenPayload()
-				binary.LittleEndian.PutUint32(p[268:272], 0xFFFFFFF3) // -13 (EACCES)
+				binary.LittleEndian.PutUint32(p[524:528], 0xFFFFFFF3) // -13 (EACCES)
 				return buildRecord(4, 0, p)
 			}(),
 			check: func(t *testing.T, d *Decoded) {
@@ -210,10 +210,10 @@ func TestDecodeValidEvents(t *testing.T) {
 		{
 			name: "file_unlink",
 			raw: func() []byte {
-				p := make([]byte, 264)
-				putStr(p[0:256], "/tmp/gone")
-				binary.LittleEndian.PutUint32(p[256:260], 0)
-				p[260] = 3 // raw_arg
+				p := make([]byte, 520)
+				putStr(p[0:512], "/tmp/gone")
+				binary.LittleEndian.PutUint32(p[512:516], 0)
+				p[516] = 3 // raw_arg
 				return buildRecord(5, 0, p)
 			}(),
 			check: func(t *testing.T, d *Decoded) {
@@ -225,12 +225,12 @@ func TestDecodeValidEvents(t *testing.T) {
 		{
 			name: "file_rename",
 			raw: func() []byte {
-				p := make([]byte, 520)
-				putStr(p[0:256], "/tmp/old")
-				putStr(p[256:512], "/tmp/new")
-				binary.LittleEndian.PutUint32(p[512:516], 0)
-				p[516] = 1
-				p[517] = 2
+				p := make([]byte, 1032)
+				putStr(p[0:512], "/tmp/old")
+				putStr(p[512:1024], "/tmp/new")
+				binary.LittleEndian.PutUint32(p[1024:1028], 0)
+				p[1028] = 1
+				p[1029] = 2
 				return buildRecord(6, 0, p)
 			}(),
 			check: func(t *testing.T, d *Decoded) {
@@ -243,11 +243,11 @@ func TestDecodeValidEvents(t *testing.T) {
 		{
 			name: "file_chmod",
 			raw: func() []byte {
-				p := make([]byte, 272)
-				putStr(p[0:256], "/tmp/x")
-				binary.LittleEndian.PutUint32(p[256:260], 0o644)
-				binary.LittleEndian.PutUint32(p[260:264], 0)
-				p[264] = 1
+				p := make([]byte, 528)
+				putStr(p[0:512], "/tmp/x")
+				binary.LittleEndian.PutUint32(p[512:516], 0o644)
+				binary.LittleEndian.PutUint32(p[516:520], 0)
+				p[520] = 1
 				return buildRecord(7, 0, p)
 			}(),
 			check: func(t *testing.T, d *Decoded) {
@@ -259,12 +259,12 @@ func TestDecodeValidEvents(t *testing.T) {
 		{
 			name: "file_close",
 			raw: func() []byte {
-				p := make([]byte, 296)
-				putStr(p[0:256], "/var/log/app.log")
-				binary.LittleEndian.PutUint64(p[256:264], 0xdeadbeef)
-				binary.LittleEndian.PutUint64(p[264:272], 4096)
-				binary.LittleEndian.PutUint64(p[272:280], 8192)
-				p[288] = 1
+				p := make([]byte, 552)
+				putStr(p[0:512], "/var/log/app.log")
+				binary.LittleEndian.PutUint64(p[512:520], 0xdeadbeef)
+				binary.LittleEndian.PutUint64(p[520:528], 4096)
+				binary.LittleEndian.PutUint64(p[528:536], 8192)
+				p[544] = 1
 				return buildRecord(8, 0, p)
 			}(),
 			check: func(t *testing.T, d *Decoded) {
@@ -278,9 +278,9 @@ func TestDecodeValidEvents(t *testing.T) {
 		{
 			name: "file_io flush is marked partial",
 			raw: func() []byte {
-				p := make([]byte, 296)
-				putStr(p[0:256], "/var/log/app.log")
-				binary.LittleEndian.PutUint64(p[272:280], 100)
+				p := make([]byte, 552)
+				putStr(p[0:512], "/var/log/app.log")
+				binary.LittleEndian.PutUint64(p[528:536], 100)
 				return buildRecord(9, 0, p)
 			}(),
 			check: func(t *testing.T, d *Decoded) {
@@ -392,10 +392,10 @@ func TestDecodeEdgeCases(t *testing.T) {
 		}
 	})
 
-	t.Run("unterminated 256-byte path is kept whole", func(t *testing.T) {
+	t.Run("unterminated 512-byte path is kept whole", func(t *testing.T) {
 		p := fileOpenPayload()
-		long := strings.Repeat("a", 256) // fills the field: no NUL terminator
-		copy(p[0:256], long)
+		long := strings.Repeat("a", 512) // fills the field: no NUL terminator
+		copy(p[0:512], long)
 		d, err := Decode(buildRecord(4, 1, p)) // EVENT_F_TRUNCATED
 		if err != nil {
 			t.Fatalf("Decode: %v", err)
@@ -406,7 +406,7 @@ func TestDecodeEdgeCases(t *testing.T) {
 
 	t.Run("unknown path_source decodes as empty string", func(t *testing.T) {
 		p := fileOpenPayload()
-		p[272] = 99 // not in enum path_source
+		p[528] = 99 // not in enum path_source
 		d, err := Decode(buildRecord(4, 0, p))
 		if err != nil {
 			t.Fatalf("Decode: %v", err)
@@ -445,20 +445,20 @@ func TestDecodeMalformed(t *testing.T) {
 		{"one byte", []byte{1}, "short record"},
 		{"71 bytes (header truncated)", make([]byte, 71), "short record"},
 		{"bad abi version 0", withVersion(buildRecord(2, 0, make([]byte, 8)), 0), "abi version 0"},
-		{"bad abi version 2", withVersion(buildRecord(2, 0, make([]byte, 8)), 2), "abi version 2"},
+		{"bad abi version 3", withVersion(buildRecord(2, 0, make([]byte, 8)), 3), "abi version 3"},
 		{"size below header", withSize(buildRecord(2, 0, make([]byte, 8)), 71), "bad record size 71"},
 		{"size zero", withSize(buildRecord(2, 0, make([]byte, 8)), 0), "bad record size 0"},
 		{"size beyond buffer", withSize(buildRecord(2, 0, make([]byte, 8)), 999), "bad record size 999"},
-		{"exec payload one byte short", shortPayload(1, 791), "exec payload"},
+		{"exec payload one byte short", shortPayload(1, 1559), "exec payload"},
 		{"exec header only", shortPayload(1, 0), "exec payload"},
 		{"fork payload short", shortPayload(2, 7), "fork payload short"},
 		{"exit payload short", shortPayload(3, 7), "exit payload short"},
-		{"file_open payload short", shortPayload(4, 279), "file_open payload short"},
-		{"unlink payload short", shortPayload(5, 263), "unlink payload short"},
-		{"rename payload short", shortPayload(6, 519), "rename payload short"},
-		{"chmod payload short", shortPayload(7, 271), "chmod payload short"},
-		{"file_close payload short", shortPayload(8, 295), "file_close payload short"},
-		{"file_io payload short", shortPayload(9, 295), "file_close payload short"},
+		{"file_open payload short", shortPayload(4, 535), "file_open payload short"},
+		{"unlink payload short", shortPayload(5, 519), "unlink payload short"},
+		{"rename payload short", shortPayload(6, 1031), "rename payload short"},
+		{"chmod payload short", shortPayload(7, 527), "chmod payload short"},
+		{"file_close payload short", shortPayload(8, 551), "file_close payload short"},
+		{"file_io payload short", shortPayload(9, 551), "file_close payload short"},
 		{"net payload short", shortPayload(10, 47), "net payload short"},
 		{"full record truncated mid-payload", full[:len(full)-1], "bad record size"},
 	}

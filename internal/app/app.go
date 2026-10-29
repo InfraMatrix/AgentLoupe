@@ -25,6 +25,12 @@ type Options struct {
 	EnableSyscallSummary bool
 	EnableFileMutations  bool
 	StatsInterval        time.Duration
+	DropPathPrefixes     []string
+	AttachPIDs           []int
+	AttachComms          []string
+	AttachExes           []string
+	UseCatalog           bool
+	CatalogOnly          []string
 }
 
 type progReq struct {
@@ -43,7 +49,10 @@ func buildRequests(lsmMode bool, o Options) []progReq {
 	if lsmMode {
 		reqs = append(reqs,
 			progReq{Name: "handle_bprm_committed_creds", Kind: "lsm", Tag: "core"},
-			progReq{Name: "handle_file_open", Kind: "lsm", Tag: "core"})
+			progReq{Name: "handle_file_open", Kind: "lsm", Tag: "core"},
+			// Always: emits file_close with duration even when byte
+			// accounting is off (counts stay zero).
+			progReq{Name: "handle_file_free_security", Kind: "lsm", Tag: "core"})
 	} else {
 		reqs = append(reqs,
 			progReq{Name: "handle_exec_tp", Kind: "raw_tp", Target: "sched_process_exec", Tag: "core"},
@@ -76,9 +85,6 @@ func buildRequests(lsmMode bool, o Options) []progReq {
 			progReq{Name: "handle_vfs_write", Kind: "fexit", Target: "vfs_write", Tag: "io"},
 			progReq{Name: "handle_vfs_readv", Kind: "fexit", Target: "vfs_readv", Tag: "io"},
 			progReq{Name: "handle_vfs_writev", Kind: "fexit", Target: "vfs_writev", Tag: "io"})
-		if lsmMode {
-			reqs = append(reqs, progReq{Name: "handle_file_free_security", Kind: "lsm", Tag: "io"})
-		}
 	}
 	if o.EnableSyscallSummary {
 		reqs = append(reqs, progReq{Name: "handle_sys_enter_count", Kind: "raw_tp", Target: "sys_enter", Tag: "syscall"})
@@ -225,6 +231,19 @@ func Run(ctx context.Context, o Options) error {
 	if !existed {
 		logf("config %s not found — running with no agent rules (scope will be empty)", o.ConfigPath)
 	}
+	mergeExtras := func(base *config.File) *config.File {
+		var extra []config.Agent
+		if o.UseCatalog || len(o.CatalogOnly) > 0 {
+			extra = append(extra, config.Catalog(o.CatalogOnly)...)
+		}
+		extra = append(extra, config.AttachRules(o.AttachPIDs, o.AttachComms, o.AttachExes)...)
+		if len(extra) == 0 {
+			return base
+		}
+		return config.Merge(base, extra)
+	}
+	cfg = mergeExtras(cfg)
+	logf("agents: %d rules after catalog/attach merge", len(cfg.Agents))
 
 	out := os.Stdout
 	var outFile *os.File
@@ -288,8 +307,14 @@ func Run(ctx context.Context, o Options) error {
 			kprobeFailed++
 		}
 	}
-	if kprobeFailed > 0 {
-		if attach(progReq{Name: "handle_enter_connect", Kind: "tracepoint", Group: "syscalls", Target: "sys_enter_connect", Tag: "core"}) {
+	// sys_enter_connect is ALWAYS attached: with TCP fexit live it runs
+	// in UDP-only mode (net_udp_only), otherwise it is the full fallback.
+	udpOnly := kprobeFailed == 0
+	if attach(progReq{Name: "handle_enter_connect", Kind: "tracepoint", Group: "syscalls", Target: "sys_enter_connect", Tag: "core"}) {
+		if err := loader.setNetUDPOnly(udpOnly); err != nil {
+			logf("warn: set net_udp_only=%v: %v", udpOnly, err)
+		}
+		if !udpOnly {
 			fallbacks = append(fallbacks, "network: sys_enter_connect replaces tcp kprobes")
 		}
 	}
@@ -323,6 +348,7 @@ func Run(ctx context.Context, o Options) error {
 
 	wallBase := wallBaseTime()
 	proc := NewProcessor(loader, wallBase, writeJSON)
+	proc.DropPrefixes = o.DropPathPrefixes
 
 	// Config watching: inotify on the config directory and each watched
 	// binary's parent directory (package managers rename over the path).
@@ -351,11 +377,13 @@ func Run(ctx context.Context, o Options) error {
 		if !existed {
 			return
 		}
+		newCfg = mergeExtras(newCfg)
 		loader.SetConfig(newCfg)
 		if err := loader.populateRules(newCfg, logf); err != nil {
 			logf("warn: rule reload: %v", err)
 		} else {
 			logf("config reloaded from %s", o.ConfigPath)
+			loader.adoptRunning(newCfg, logf)
 		}
 	})
 

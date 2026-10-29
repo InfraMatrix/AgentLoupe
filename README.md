@@ -82,8 +82,42 @@ Opt-in probes (off by default):
 ```sh
 --enable-file-mutations    # unlink / rename / chmod events
 --enable-io-accounting     # vfs_* byte counts + file_close (make bench-io first)
---enable-syscall-summary   # per-(session, syscall) counts
+--enable-syscall-summary   # per-(session, syscall) counts, dumped by name
+                           # in the stats log (top 25 per session)
 ```
+
+### Attaching to already-running agents
+
+```sh
+# Built-in catalog (Claude Code, Codex, Aider, Gemini CLI, Cursor —
+# only entries present on this host are activated):
+sudo ./agentloupe --catalog --bpf-object bpf/agentloupe.bpf.o
+sudo ./agentloupe --catalog-only claude-code --bpf-object bpf/agentloupe.bpf.o
+
+# Ad-hoc targets (repeatable; existing children are adopted too):
+sudo ./agentloupe --attach-pid 1234 --attach-comm claude --attach-exe '/usr/bin/c*' \
+  --bpf-object bpf/agentloupe.bpf.o
+```
+
+Adoption runs at startup and re-runs every 5s (and after config reloads),
+so agents started after Loupe are adopted without a config entry.
+
+### Reducing a capture
+
+```sh
+go build -o loupe-scorecard ./cmd/loupe-scorecard
+./loupe-scorecard capture.jsonl          # per-session table
+./loupe-scorecard --json capture.jsonl   # machine-readable
+```
+
+Useful loader flags: `--drop-path-prefix /proc/` (repeatable) suppresses
+file-event noise (e.g. agents polling their own `/proc/<pid>/stat`);
+`session_end` events carry `cpu_user_ms`/`cpu_sys_ms` (session root
+process CPU, sampled from `/proc`). Network events cover TCP and UDP;
+connects to port 53 are flagged `"dns": true` (no payload parsing).
+Paths/argv are captured up to 512 bytes (ABI v2); `comm` remains capped
+at 16 chars by the kernel (`TASK_COMM_LEN`) — use exec `filename`/`argv`
+to disambiguate.
 
 Verify nothing is left behind after exit (dev-mode guarantee):
 
@@ -103,8 +137,9 @@ Three layers, deliberately kept separate:
   the LSM return-0 checker (an LSM hook must never deny an operation).
 - **Integration test** — `sudo make integration`. Real loader, real
   kernel, real workloads: a python process matched as an interpreter
-  candidate and confirmed from argv, a child exec, a file open, and a
-  TCP connect to a local listener. It asserts the expected events with
+  candidate and confirmed from argv, a child exec, a file open, and
+  TCP and UDP connects to local listeners, with the syscall-summary
+  probe enabled. It asserts the expected events with
   correct PID/comm/path/address, zero ring-buffer drops and zero
   map-full/lost counters, and that no BPF programs, maps, links, or
   pinned objects remain after shutdown. Root-only: the test skips
@@ -118,14 +153,16 @@ Three layers, deliberately kept separate:
 | Environment | Mode | Result |
 |---|---|---|
 | Ubuntu, kernel 7.0.0-42-generic, Go 1.26.8, clang 21.1.8, kernel BTF present, `bpf` in `/sys/kernel/security/lsm` | LSM, full requested probe set | `make test` pass, `sudo make integration` **PASS**, 2026-10-28 |
+| Same host | LSM, `--catalog-only claude-code` under plain `sudo` | Catalog resolved the per-user install (`SUDO_USER` home), adopted 1 already-running Claude Code process tree, 29,035 events in 87s with zero ring-buffer drops / lost counters, reduced with `loupe-scorecard`, 2026-10-29 |
 
 Not yet tested on a live kernel:
 
 - **Tracepoint fallback mode** (no `bpf` in `lsm=`). The loader selects
   it automatically; it has never been loaded live — treat as unverified.
 - **Opt-in probe sets** (`--enable-file-mutations`,
-  `--enable-io-accounting`, `--enable-syscall-summary`). Not attached
-  in the tested configuration.
+  `--enable-io-accounting`). Not attached in the tested configuration.
+  (`--enable-syscall-summary` is enabled by the integration test and
+  the adoption smoke above.)
 - **Any other kernel version.** The 5.8 / 5.11 figures above are design
   floors, not tested versions.
 

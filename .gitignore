@@ -1,8 +1,9 @@
 # AgentLoupe — Go + eBPF. All patterns are anchored to specific paths so
 # they can never shadow source directories or go.mod/go.sum.
 
-# Built loader binary (make build)
+# Built binaries (make build / go build -o)
 /agentloupe
+/loupe-scorecard
 
 # Compiled BPF objects, generated next to their sources by `make bpf`
 /bpf/*.o
@@ -10,6 +11,7 @@
 
 # Local run output: JSONL event streams, loader logs, scratch configs.
 /tmp/
+/*.jsonl
 
 # Go test / coverage artifacts produced at the repo root
 /coverage.out

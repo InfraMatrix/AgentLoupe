@@ -83,6 +83,8 @@ static __always_inline bool cfg_enabled(__u32 which)
 		return cfg->enable_file_io_accounting != 0;
 	if (which == 3)
 		return cfg->enable_file_mutations != 0;
+	if (which == 4)
+		return cfg->net_udp_only != 0;
 	return false;
 }
 
@@ -306,7 +308,13 @@ static __always_inline void
 fill_hdr(struct event_hdr *hdr, __u32 type, __u32 total_len, __u64 sid,
 	 const struct session_info *info, struct task_struct *task, __u32 tgid)
 {
-	__builtin_memset(hdr, 0, sizeof(*hdr));
+	int i;
+
+	/* Explicit loop, not __builtin_memset: at ABI v2 payload sizes
+	 * clang otherwise emits a memset libcall the BPF target lacks. */
+#pragma unroll
+	for (i = 0; i < (int)sizeof(*hdr); i++)
+		((volatile char *)hdr)[i] = 0;
 	hdr->type = (__u16)type;
 	hdr->size = (__u16)total_len;
 	hdr->version = AGENTLOUPE_ABI_VERSION;
@@ -344,7 +352,12 @@ reserve_event(__u32 type, __u32 total_len, __u64 sid,
 		bump_stat(type, true);
 		return NULL;
 	}
-	__builtin_memset(hdr, 0, total_len);
+	{
+		__u32 i;
+
+		for (i = 0; i < total_len; i++)
+			((volatile char *)hdr)[i] = 0;
+	}
 	fill_hdr(hdr, type, total_len, sid, info, task, tgid);
 	return hdr;
 }
