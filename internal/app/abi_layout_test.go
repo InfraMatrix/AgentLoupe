@@ -43,9 +43,9 @@ type eventHdrMirror struct {
 }
 
 type evExecMirror struct {
-	Filename       [256]byte
-	Cwd            [256]byte
-	Argv           [256]byte
+	Filename       [512]byte
+	Cwd            [512]byte
+	Argv           [512]byte
 	Argc           uint32
 	AuditLoginUID  uint32
 	AuditSessionID uint32
@@ -67,7 +67,7 @@ type evExitMirror struct {
 }
 
 type evFileOpenMirror struct {
-	Path    [256]byte
+	Path    [512]byte
 	FilePtr uint64
 	Flags   uint32
 	Result  int32
@@ -77,15 +77,15 @@ type evFileOpenMirror struct {
 }
 
 type evFileUnlinkMirror struct {
-	Path    [256]byte
+	Path    [512]byte
 	Result  int32
 	PathSrc uint8
 	Pad     [3]uint8
 }
 
 type evFileRenameMirror struct {
-	OldPath    [256]byte
-	NewPath    [256]byte
+	OldPath    [512]byte
+	NewPath    [512]byte
 	Result     int32
 	OldPathSrc uint8
 	NewPathSrc uint8
@@ -93,7 +93,7 @@ type evFileRenameMirror struct {
 }
 
 type evFileChmodMirror struct {
-	Path    [256]byte
+	Path    [512]byte
 	Mode    uint32
 	Result  int32
 	PathSrc uint8
@@ -102,7 +102,7 @@ type evFileChmodMirror struct {
 }
 
 type evFileCloseMirror struct {
-	Path       [256]byte
+	Path       [512]byte
 	FilePtr    uint64
 	ReadBytes  uint64
 	WriteBytes uint64
@@ -140,7 +140,7 @@ type trackedSessionMirror struct {
 }
 
 type fdInfoMirror struct {
-	Path       [256]byte
+	Path       [512]byte
 	SessionID  uint64
 	ReadBytes  uint64
 	WriteBytes uint64
@@ -270,27 +270,27 @@ func TestStructOffsetsMatchDecoder(t *testing.T) {
 		{"event_hdr.ppid (raw[48:52])", unsafe.Offsetof(eventHdrMirror{}.PPID), 48},
 		{"event_hdr.uid (raw[52:56])", unsafe.Offsetof(eventHdrMirror{}.UID), 52},
 		{"event_hdr.comm (raw[56:72])", unsafe.Offsetof(eventHdrMirror{}.Comm), 56},
-		{"ev_exec.argc (p[768:772])", unsafe.Offsetof(evExecMirror{}.Argc), 768},
-		{"ev_exec.audit_loginuid (p[772:776])", unsafe.Offsetof(evExecMirror{}.AuditLoginUID), 772},
-		{"ev_exec.filename_src (p[784])", unsafe.Offsetof(evExecMirror{}.FilenameSrc), 784},
-		{"ev_exec.cwd_src (p[785])", unsafe.Offsetof(evExecMirror{}.CwdSrc), 785},
-		{"ev_file_open.file_ptr (p[256:264])", unsafe.Offsetof(evFileOpenMirror{}.FilePtr), 256},
-		{"ev_file_open.flags (p[264:268])", unsafe.Offsetof(evFileOpenMirror{}.Flags), 264},
-		{"ev_file_open.result (p[268:272])", unsafe.Offsetof(evFileOpenMirror{}.Result), 268},
-		{"ev_file_open.path_src (p[272])", unsafe.Offsetof(evFileOpenMirror{}.PathSrc), 272},
-		{"ev_file_unlink.result (p[256:260])", unsafe.Offsetof(evFileUnlinkMirror{}.Result), 256},
-		{"ev_file_unlink.path_src (p[260])", unsafe.Offsetof(evFileUnlinkMirror{}.PathSrc), 260},
-		{"ev_file_rename.result (p[512:516])", unsafe.Offsetof(evFileRenameMirror{}.Result), 512},
-		{"ev_file_rename.old_path_src (p[516])", unsafe.Offsetof(evFileRenameMirror{}.OldPathSrc), 516},
-		{"ev_file_rename.new_path_src (p[517])", unsafe.Offsetof(evFileRenameMirror{}.NewPathSrc), 517},
-		{"ev_file_chmod.mode (p[256:260])", unsafe.Offsetof(evFileChmodMirror{}.Mode), 256},
-		{"ev_file_chmod.result (p[260:264])", unsafe.Offsetof(evFileChmodMirror{}.Result), 260},
-		{"ev_file_chmod.path_src (p[264])", unsafe.Offsetof(evFileChmodMirror{}.PathSrc), 264},
-		{"ev_file_close.file_ptr (p[256:264])", unsafe.Offsetof(evFileCloseMirror{}.FilePtr), 256},
-		{"ev_file_close.read_bytes (p[264:272])", unsafe.Offsetof(evFileCloseMirror{}.ReadBytes), 264},
-		{"ev_file_close.write_bytes (p[272:280])", unsafe.Offsetof(evFileCloseMirror{}.WriteBytes), 272},
-		{"ev_file_close.open_ts_ns (p[280:288])", unsafe.Offsetof(evFileCloseMirror{}.OpenTSNS), 280},
-		{"ev_file_close.path_src (p[288])", unsafe.Offsetof(evFileCloseMirror{}.PathSrc), 288},
+		{"ev_exec.argc (p[1536:1540])", unsafe.Offsetof(evExecMirror{}.Argc), 1536},
+		{"ev_exec.audit_loginuid (p[1540:1544])", unsafe.Offsetof(evExecMirror{}.AuditLoginUID), 1540},
+		{"ev_exec.filename_src (p[1552])", unsafe.Offsetof(evExecMirror{}.FilenameSrc), 1552},
+		{"ev_exec.cwd_src (p[1553])", unsafe.Offsetof(evExecMirror{}.CwdSrc), 1553},
+		{"ev_file_open.file_ptr (p[512:520])", unsafe.Offsetof(evFileOpenMirror{}.FilePtr), 512},
+		{"ev_file_open.flags (p[520:524])", unsafe.Offsetof(evFileOpenMirror{}.Flags), 520},
+		{"ev_file_open.result (p[524:528])", unsafe.Offsetof(evFileOpenMirror{}.Result), 524},
+		{"ev_file_open.path_src (p[528])", unsafe.Offsetof(evFileOpenMirror{}.PathSrc), 528},
+		{"ev_file_unlink.result (p[512:516])", unsafe.Offsetof(evFileUnlinkMirror{}.Result), 512},
+		{"ev_file_unlink.path_src (p[516])", unsafe.Offsetof(evFileUnlinkMirror{}.PathSrc), 516},
+		{"ev_file_rename.result (p[1024:1028])", unsafe.Offsetof(evFileRenameMirror{}.Result), 1024},
+		{"ev_file_rename.old_path_src (p[1028])", unsafe.Offsetof(evFileRenameMirror{}.OldPathSrc), 1028},
+		{"ev_file_rename.new_path_src (p[1029])", unsafe.Offsetof(evFileRenameMirror{}.NewPathSrc), 1029},
+		{"ev_file_chmod.mode (p[512:516])", unsafe.Offsetof(evFileChmodMirror{}.Mode), 512},
+		{"ev_file_chmod.result (p[516:520])", unsafe.Offsetof(evFileChmodMirror{}.Result), 516},
+		{"ev_file_chmod.path_src (p[520])", unsafe.Offsetof(evFileChmodMirror{}.PathSrc), 520},
+		{"ev_file_close.file_ptr (p[512:520])", unsafe.Offsetof(evFileCloseMirror{}.FilePtr), 512},
+		{"ev_file_close.read_bytes (p[520:528])", unsafe.Offsetof(evFileCloseMirror{}.ReadBytes), 520},
+		{"ev_file_close.write_bytes (p[528:536])", unsafe.Offsetof(evFileCloseMirror{}.WriteBytes), 528},
+		{"ev_file_close.open_ts_ns (p[536:544])", unsafe.Offsetof(evFileCloseMirror{}.OpenTSNS), 536},
+		{"ev_file_close.path_src (p[544])", unsafe.Offsetof(evFileCloseMirror{}.PathSrc), 544},
 		{"ev_net_connect.dport (p[32:34])", unsafe.Offsetof(evNetConnectMirror{}.Dport), 32},
 		{"ev_net_connect.sport (p[34:36])", unsafe.Offsetof(evNetConnectMirror{}.Sport), 34},
 		{"ev_net_connect.family (p[36:38])", unsafe.Offsetof(evNetConnectMirror{}.Family), 36},
@@ -298,9 +298,9 @@ func TestStructOffsetsMatchDecoder(t *testing.T) {
 		{"ev_net_connect.result (p[40:44])", unsafe.Offsetof(evNetConnectMirror{}.Result), 40},
 		{"session_info.agent_name (raw[40:72])", unsafe.Offsetof(sessionInfoMirror{}.AgentName), 40},
 		{"session_info.root_comm (raw[72:88])", unsafe.Offsetof(sessionInfoMirror{}.RootComm), 72},
-		{"fd_info.session_id (raw[256:264])", unsafe.Offsetof(fdInfoMirror{}.SessionID), 256},
-		{"fd_info.opener_tgid (raw[296:300])", unsafe.Offsetof(fdInfoMirror{}.OpenerTGID), 296},
-		{"fd_info.path_src (raw[308])", unsafe.Offsetof(fdInfoMirror{}.PathSrc), 308},
+		{"fd_info.session_id (raw[512:520])", unsafe.Offsetof(fdInfoMirror{}.SessionID), 512},
+		{"fd_info.opener_tgid (raw[552:556])", unsafe.Offsetof(fdInfoMirror{}.OpenerTGID), 552},
+		{"fd_info.path_src (raw[564])", unsafe.Offsetof(fdInfoMirror{}.PathSrc), 564},
 		{"binary_id.ino (key[8:16])", unsafe.Offsetof(binaryIDMirror{}.Ino), 8},
 		{"agent_ref.agent_name (v[4:36])", unsafe.Offsetof(agentRefMirror{}.AgentName), 4},
 	}
@@ -344,9 +344,9 @@ func TestABIVersionMatchesHeader(t *testing.T) {
 	if m == nil {
 		t.Fatal("AGENTLOUPE_ABI_VERSION not found in bpf/agentloupe.h")
 	}
-	// Decode rejects anything but version 1 (see TestDecodeMalformed);
+	// Decode rejects anything but version 2 (see TestDecodeMalformed);
 	// if the header bumps the version, the decoder must move with it.
-	if string(m[1]) != "1" {
-		t.Errorf("AGENTLOUPE_ABI_VERSION = %s, but the Go decoder only accepts 1", m[1])
+	if string(m[1]) != "2" {
+		t.Errorf("AGENTLOUPE_ABI_VERSION = %s, but the Go decoder only accepts 2", m[1])
 	}
 }

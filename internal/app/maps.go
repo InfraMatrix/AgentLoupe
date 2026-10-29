@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -165,9 +166,12 @@ type Loader struct {
 	coll *ebpf.Collection
 	cfg  *config.File
 
+	mu        sync.Mutex
 	runID     uint64
 	nextSID   uint64
 	metaCache map[uint64]SessionMeta
+	cpuCache  map[uint64][2]uint64 // session -> {user_ms, sys_ms} last sample
+	adopted   map[uint32]uint64    // tgid -> session adopted from /proc
 
 	prevBinaryKeys    map[[16]byte]bool
 	prevCandidateKeys map[[16]byte]bool
@@ -199,6 +203,8 @@ func newLoader(coll *ebpf.Collection) (*Loader, error) {
 	l := &Loader{
 		coll:       coll,
 		metaCache:  make(map[uint64]SessionMeta),
+		cpuCache:   make(map[uint64][2]uint64),
+		adopted:    make(map[uint32]uint64),
 		flushState: make(map[flushKey]flushVal),
 	}
 	var rnd [4]byte
@@ -233,6 +239,24 @@ func (l *Loader) setConfig(ioAccounting, syscallSummary, fileMutations bool) err
 	binary.LittleEndian.PutUint32(val[8:12], boolToU32(syscallSummary))
 	binary.LittleEndian.PutUint32(val[12:16], boolToU32(ioAccounting))
 	binary.LittleEndian.PutUint32(val[16:20], boolToU32(fileMutations))
+	binary.LittleEndian.PutUint32(val[20:24], 0) // net_udp_only: set post-attach
+	return m.Update(&key0, &val, ebpf.UpdateAny)
+}
+
+// setNetUDPOnly flips the enter_connect mode once attach results are
+// known: true means the TCP fexit probes are live, so the syscall probe
+// must emit SOCK_DGRAM only.
+func (l *Loader) setNetUDPOnly(udpOnly bool) error {
+	m := l.coll.Maps["config_map"]
+	if m == nil {
+		return fmt.Errorf("config_map missing from object")
+	}
+	key0 := uint32(0)
+	val := make([]byte, 24)
+	if err := m.Lookup(&key0, &val); err != nil {
+		return err
+	}
+	binary.LittleEndian.PutUint32(val[20:24], boolToU32(udpOnly))
 	return m.Update(&key0, &val, ebpf.UpdateAny)
 }
 
@@ -245,8 +269,16 @@ func boolToU32(b bool) uint32 {
 
 // SetConfig swaps the active rule set (live reload). Rules() is the
 // SessionControl view used by the event processor.
-func (l *Loader) SetConfig(cfg *config.File) { l.cfg = cfg }
-func (l *Loader) Rules() *config.File        { return l.cfg }
+func (l *Loader) SetConfig(cfg *config.File) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.cfg = cfg
+}
+func (l *Loader) Rules() *config.File {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.cfg
+}
 
 // populateRules (re)resolves the config into agent_binaries / candidates /
 // agent_cgroups, deleting keys that disappeared since the last call so
@@ -289,7 +321,7 @@ func (l *Loader) populateRules(cfg *config.File, logf func(string, ...any)) erro
 			}
 			cgroupPaths = append(cgroupPaths, p)
 		}
-		if m.K8SLabel != "" {
+		if m.K8SLabel != "" && !strings.HasPrefix(m.K8SLabel, "__attach_") {
 			token := m.K8SLabel
 			if i := strings.Index(token, "="); i >= 0 {
 				token = token[i+1:]
@@ -382,6 +414,12 @@ func indexByte(b []byte, target byte) int {
 }
 
 func (l *Loader) LookupMeta(sid uint64) (SessionMeta, bool) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.lookupMetaLocked(sid)
+}
+
+func (l *Loader) lookupMetaLocked(sid uint64) (SessionMeta, bool) {
 	if m, ok := l.metaCache[sid]; ok {
 		return m, true
 	}
@@ -399,6 +437,8 @@ func (l *Loader) LookupMeta(sid uint64) (SessionMeta, bool) {
 }
 
 func (l *Loader) mutateSession(sid uint64, fn func(raw *[88]byte)) error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
 	m := l.coll.Maps["sessions"]
 	if m == nil {
 		return fmt.Errorf("sessions map missing")
@@ -440,8 +480,261 @@ func (l *Loader) Reject(sid uint64) error {
 	})
 }
 
-// ---- startup /proc adoption (runs BEFORE attach: no race with the
-// kernel-side session allocator, which only fires from probes) ----
+// ---- CPU sampling (/proc/<tgid>/stat) ----
+
+// parseProcStat extracts (utime+cutime, stime+cstime) in milliseconds.
+// /proc stat fields 14-17 are in USER_HZ ticks; USER_HZ is fixed at 100
+// by the kernel ABI regardless of CONFIG_HZ.
+func parseProcStat(data []byte) (userMS, sysMS uint64, ok bool) {
+	// comm (field 2) is parenthesised and may contain spaces/parens.
+	i := -1
+	for j := len(data) - 1; j >= 0; j-- {
+		if data[j] == ')' {
+			i = j
+			break
+		}
+	}
+	if i < 0 {
+		return 0, 0, false
+	}
+	f := strings.Fields(string(data[i+1:]))
+	// f[0] is field 3 (state); utime=14 -> f[11], stime=15 -> f[12],
+	// cutime=16 -> f[13], cstime=17 -> f[14].
+	if len(f) < 15 {
+		return 0, 0, false
+	}
+	parse := func(s string) uint64 { v, _ := strconv.ParseUint(s, 10, 64); return v }
+	userTicks := parse(f[11]) + parse(f[13])
+	sysTicks := parse(f[12]) + parse(f[14])
+	return userTicks * 10, sysTicks * 10, true
+}
+
+// SessionCPU returns the last sampled CPU for a session root (the process
+// is gone by the time its exit event is processed, so last-sample-wins).
+func (l *Loader) SessionCPU(sid uint64) (uint64, uint64, bool) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	v, ok := l.cpuCache[sid]
+	return v[0], v[1], ok
+}
+
+func (l *Loader) sampleTrackedCPU() {
+	tracked := l.coll.Maps["tracked_sessions"]
+	if tracked == nil {
+		return
+	}
+	type pair struct {
+		tgid uint32
+		sid  uint64
+	}
+	var pairs []pair
+	it := tracked.Iterate()
+	var tgid uint32
+	var sidVal [8]byte
+	for it.Next(&tgid, &sidVal) {
+		pairs = append(pairs, pair{tgid, binary.LittleEndian.Uint64(sidVal[:])})
+	}
+	for _, pr := range pairs {
+		meta, ok := l.LookupMeta(pr.sid)
+		if !ok || meta.RootTGID != pr.tgid {
+			continue // root processes only
+		}
+		data, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pr.tgid))
+		if err != nil {
+			continue
+		}
+		if u, s, ok := parseProcStat(data); ok {
+			l.mu.Lock()
+			l.cpuCache[pr.sid] = [2]uint64{u, s}
+			l.mu.Unlock()
+		}
+	}
+}
+
+// ---- /proc adoption: startup + periodic, whole process trees ----
+
+type procEntry struct {
+	PID, PPID int
+	Exe       string
+	Cmdline   string
+	Comm      string
+	CgPath    string
+	CgID      uint64
+}
+
+func readProcEntry(pid int) (procEntry, bool) {
+	e := procEntry{PID: pid}
+	data, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid))
+	if err != nil {
+		return e, false
+	}
+	if i := strings.LastIndex(string(data), ")"); i >= 0 {
+		f := strings.Fields(string(data)[i+1:])
+		if len(f) >= 2 {
+			e.PPID, _ = strconv.Atoi(f[1]) // f[0]=state, f[1]=ppid
+		}
+	}
+	e.Exe, _ = os.Readlink(fmt.Sprintf("/proc/%d/exe", pid))
+	if b, err := os.ReadFile(fmt.Sprintf("/proc/%d/cmdline", pid)); err == nil {
+		e.Cmdline = strings.ReplaceAll(string(b), "\x00", " ")
+	}
+	if b, err := os.ReadFile(fmt.Sprintf("/proc/%d/comm", pid)); err == nil {
+		e.Comm = strings.TrimSpace(string(b))
+	}
+	if b, err := os.ReadFile(fmt.Sprintf("/proc/%d/cgroup", pid)); err == nil {
+		for _, line := range strings.Split(string(b), "\n") {
+			if parts := strings.SplitN(line, ":", 3); len(parts) == 3 && parts[1] == "" {
+				e.CgPath = parts[2]
+			}
+		}
+	}
+	if e.CgPath != "" {
+		if id, err := cgroupIDForPath(filepath.Join("/sys/fs/cgroup", e.CgPath)); err == nil {
+			e.CgID = id
+		}
+	}
+	return e, true
+}
+
+func scanProc() []procEntry {
+	entries, err := os.ReadDir("/proc")
+	if err != nil {
+		return nil
+	}
+	self := os.Getpid()
+	var out []procEntry
+	for _, en := range entries {
+		pid, err := strconv.Atoi(en.Name())
+		if err != nil || pid == self {
+			continue
+		}
+		if e, ok := readProcEntry(pid); ok {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
+func matchProcEntry(cfg *config.File, e procEntry) (config.Agent, bool) {
+	for _, a := range cfg.Agents {
+		m := a.Match
+		if m.ExecPath != "" && e.Exe != "" {
+			if rp, err := filepath.EvalSymlinks(m.ExecPath); err == nil && rp == e.Exe {
+				return a, true
+			}
+		}
+		if m.Interpreter != "" && m.ArgvContains != "" && e.Exe != "" {
+			if rp, err := filepath.EvalSymlinks(m.Interpreter); err == nil && rp == e.Exe &&
+				strings.Contains(e.Cmdline, m.ArgvContains) {
+				return a, true
+			}
+		}
+		if m.Cgroup != "" && e.CgPath != "" {
+			want := m.Cgroup
+			if !strings.HasPrefix(want, "/") {
+				want = "/" + want
+			}
+			if e.CgPath == want || strings.HasPrefix(e.CgPath, want+"/") {
+				return a, true
+			}
+		}
+		// Ad-hoc / catalog synthetic rules (not expressible in YAML):
+		if m.K8SLabel == "__attach_pid__" && m.Cgroup == fmt.Sprintf("%d", e.PID) {
+			return a, true
+		}
+		if m.K8SLabel == "__attach_comm__" && (e.Comm == m.Cgroup || baseName(e.Exe) == m.Cgroup) {
+			return a, true
+		}
+		if m.K8SLabel == "__attach_exe__" {
+			if ok, _ := filepath.Match(m.Cgroup, e.Exe); ok {
+				return a, true
+			}
+		}
+	}
+	return config.Agent{}, false
+}
+
+// adoptRunning attaches already-running agents AND their existing
+// descendants. Safe to call periodically: inserts use UpdateNoExist and
+// a lost race deletes the just-created session rather than orphaning a
+// kernel-created one.
+func (l *Loader) adoptRunning(cfg *config.File, logf func(string, ...any)) {
+	sessions := l.coll.Maps["sessions"]
+	tracked := l.coll.Maps["tracked_sessions"]
+	if sessions == nil || tracked == nil {
+		return
+	}
+	snap := scanProc()
+	alive := map[int]bool{}
+	children := map[int][]int{}
+	for _, e := range snap {
+		alive[e.PID] = true
+		children[e.PPID] = append(children[e.PPID], e.PID)
+	}
+
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.adopted == nil {
+		l.adopted = make(map[uint32]uint64)
+	}
+	for tgid := range l.adopted {
+		if !alive[int(tgid)] {
+			delete(l.adopted, tgid)
+		}
+	}
+	adopted := 0
+	for _, e := range snap {
+		rule, ok := matchProcEntry(cfg, e)
+		if !ok {
+			continue
+		}
+		tgid := uint32(e.PID)
+		if _, done := l.adopted[tgid]; done {
+			continue
+		}
+		var existing [8]byte
+		if err := tracked.Lookup(&tgid, &existing); err == nil {
+			l.adopted[tgid] = binary.LittleEndian.Uint64(existing[:])
+			continue
+		}
+		sid := l.allocSIDForAdoption()
+		raw := makeSessionInfo(2, uint32(rule.Index), 8 /*SESSION_F_FROM_PROC*/, tgid, 0, e.CgID, rule.Name, e.Comm)
+		key := sid
+		if err := sessions.Update(&key, &raw, ebpf.UpdateAny); err != nil {
+			continue
+		}
+		var sidVal [8]byte
+		binary.LittleEndian.PutUint64(sidVal[:], sid)
+		if err := tracked.Update(&tgid, &sidVal, ebpf.UpdateNoExist); err != nil {
+			_ = sessions.Delete(&key) // kernel-created session won the race
+			continue
+		}
+		delete(l.metaCache, sid)
+		l.adopted[tgid] = sid
+		adopted++
+		// BFS: pre-existing descendants join the root's session.
+		queue := append([]int{}, children[e.PID]...)
+		for len(queue) > 0 {
+			child := queue[0]
+			queue = queue[1:]
+			queue = append(queue, children[child]...)
+			ct := uint32(child)
+			if _, done := l.adopted[ct]; done {
+				continue
+			}
+			if err := tracked.Lookup(&ct, &existing); err == nil {
+				l.adopted[ct] = binary.LittleEndian.Uint64(existing[:])
+				continue
+			}
+			if err := tracked.Update(&ct, &sidVal, ebpf.UpdateNoExist); err == nil {
+				l.adopted[ct] = sid
+			}
+		}
+	}
+	if adopted > 0 {
+		logf("adoption scan: adopted %d already-running agent processes (with existing children)", adopted)
+	}
+}
 
 func (l *Loader) allocSIDForAdoption() uint64 {
 	sid := l.nextSID
@@ -466,99 +759,6 @@ func makeSessionInfo(state, agentID, flags, rootTGID uint32, parent, cgid uint64
 	copy(raw[40:72], name)
 	copy(raw[72:88], comm)
 	return raw
-}
-
-func (l *Loader) adoptRunning(cfg *config.File, logf func(string, ...any)) {
-	sessions := l.coll.Maps["sessions"]
-	tracked := l.coll.Maps["tracked_sessions"]
-	if sessions == nil || tracked == nil {
-		return
-	}
-	entries, err := os.ReadDir("/proc")
-	if err != nil {
-		return
-	}
-	self := os.Getpid()
-	adopted := 0
-	for _, e := range entries {
-		pid, err := strconv.Atoi(e.Name())
-		if err != nil || pid == self {
-			continue
-		}
-		rule, cgid, ok := matchRunningProcess(cfg, pid)
-		if !ok {
-			continue
-		}
-		comm := ""
-		if data, err := os.ReadFile(fmt.Sprintf("/proc/%d/comm", pid)); err == nil {
-			comm = strings.TrimSpace(string(data))
-		}
-		sid := l.allocSIDForAdoption()
-		raw := makeSessionInfo(2, uint32(rule.Index), 8 /*SESSION_F_FROM_PROC*/, uint32(pid), 0, cgid, rule.Name, comm)
-		key := sid
-		if err := sessions.Update(&key, &raw, ebpf.UpdateAny); err != nil {
-			continue
-		}
-		tgid := uint32(pid)
-		var sidVal [8]byte
-		binary.LittleEndian.PutUint64(sidVal[:], sid)
-		if err := tracked.Update(&tgid, &sidVal, ebpf.UpdateAny); err != nil {
-			_ = sessions.Delete(&key)
-			continue
-		}
-		delete(l.metaCache, sid)
-		adopted++
-	}
-	if adopted > 0 {
-		logf("startup scan: adopted %d already-running agent processes", adopted)
-	}
-}
-
-func matchRunningProcess(cfg *config.File, pid int) (config.Agent, uint64, bool) {
-	exe, _ := os.Readlink(fmt.Sprintf("/proc/%d/exe", pid))
-	cmdline := ""
-	if data, err := os.ReadFile(fmt.Sprintf("/proc/%d/cmdline", pid)); err == nil {
-		cmdline = strings.ReplaceAll(string(data), "\x00", " ")
-	}
-	cgPath := ""
-	cgid := uint64(0)
-	if data, err := os.ReadFile(fmt.Sprintf("/proc/%d/cgroup", pid)); err == nil {
-		for _, line := range strings.Split(string(data), "\n") {
-			parts := strings.SplitN(line, ":", 3)
-			if len(parts) == 3 && parts[1] == "" {
-				cgPath = parts[2]
-			}
-		}
-	}
-	if cgPath != "" {
-		if id, err := cgroupIDForPath(filepath.Join("/sys/fs/cgroup", cgPath)); err == nil {
-			cgid = id
-		}
-	}
-	for _, a := range cfg.Agents {
-		m := a.Match
-		if m.ExecPath != "" && exe != "" {
-			if rp, err := filepath.EvalSymlinks(m.ExecPath); err == nil && rp == exe {
-				return a, cgid, true
-			}
-		}
-		if m.Interpreter != "" && m.ArgvContains != "" && exe != "" {
-			if rp, err := filepath.EvalSymlinks(m.Interpreter); err == nil && rp == exe &&
-				strings.Contains(cmdline, m.ArgvContains) {
-				return a, cgid, true
-			}
-		}
-		if m.Cgroup != "" && cgPath != "" {
-			want := m.Cgroup
-			if !strings.HasPrefix(want, "/") {
-				want = "/" + want
-			}
-			if cgPath == want || strings.HasPrefix(cgPath, want+"/") {
-				return a, cgid, true
-			}
-		}
-	}
-	return config.Agent{}, 0, false
 }
 
 var _ = time.Now

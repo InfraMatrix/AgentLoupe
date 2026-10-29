@@ -81,8 +81,8 @@ func Decode(raw []byte) (*Decoded, error) {
 	}
 	size := int(binary.LittleEndian.Uint16(raw[2:4]))
 	version := binary.LittleEndian.Uint16(raw[4:6])
-	if version != 1 {
-		return nil, fmt.Errorf("abi version %d, want 1", version)
+	if version != 2 {
+		return nil, fmt.Errorf("abi version %d, want 2", version)
 	}
 	if size < 72 || size > len(raw) {
 		return nil, fmt.Errorf("bad record size %d (have %d)", size, len(raw))
@@ -92,26 +92,26 @@ func Decode(raw []byte) (*Decoded, error) {
 	need := func(n int) bool { return len(p) >= n }
 
 	switch d.Type {
-	case 1: // exec: filename[256] cwd[256] argv[256] ...
-		if !need(792) {
+	case 1: // exec: filename[512] cwd[512] argv[512] ...
+		if !need(1560) {
 			return nil, fmt.Errorf("exec payload %d bytes", len(p))
 		}
-		d.Fields["filename"] = cstr(p[0:256])
-		d.Fields["cwd"] = cstr(p[256:512])
-		d.Fields["argv"] = parseArgv(p[512:768])
-		// Kernel leaves argv argc (p[768:772]) at 0 — counting is done
+		d.Fields["filename"] = cstr(p[0:512])
+		d.Fields["cwd"] = cstr(p[512:1024])
+		d.Fields["argv"] = parseArgv(p[1024:1536])
+		// Kernel leaves argv argc (p[1536:1540]) at 0 — counting is done
 		// here, exactly, from the parsed argv.
 		if argv, ok := d.Fields["argv"].([]string); ok {
 			d.Fields["argc"] = len(argv)
 		} else {
 			d.Fields["argc"] = 0
 		}
-		loginuid := binary.LittleEndian.Uint32(p[772:776])
+		loginuid := binary.LittleEndian.Uint32(p[1540:1544])
 		if loginuid != 4294967295 {
 			d.Fields["loginuid"] = loginuid
 		} // else: unset — JSON falls back to common "uid" field
-		d.Fields["filename_src"] = pathSrcNames[p[784]]
-		d.Fields["cwd_src"] = pathSrcNames[p[785]]
+		d.Fields["filename_src"] = pathSrcNames[p[1552]]
+		d.Fields["cwd_src"] = pathSrcNames[p[1553]]
 	case 2: // fork
 		if !need(8) {
 			return nil, fmt.Errorf("fork payload short")
@@ -124,47 +124,50 @@ func Decode(raw []byte) (*Decoded, error) {
 		}
 		d.Fields["exit_code"] = int32(binary.LittleEndian.Uint32(p[0:4]))
 	case 4: // file_open
-		if !need(280) {
+		if !need(536) {
 			return nil, fmt.Errorf("file_open payload short")
 		}
-		d.Fields["path"] = cstr(p[0:256])
-		d.Fields["file_ptr"] = fmt.Sprintf("%#x", binary.LittleEndian.Uint64(p[256:264]))
-		d.Fields["open_flags"] = binary.LittleEndian.Uint32(p[264:268])
-		d.Fields["result"] = int32(binary.LittleEndian.Uint32(p[268:272]))
-		d.Fields["path_src"] = pathSrcNames[p[272]]
+		d.Fields["path"] = cstr(p[0:512])
+		d.Fields["file_ptr"] = fmt.Sprintf("%#x", binary.LittleEndian.Uint64(p[512:520]))
+		d.Fields["open_flags"] = binary.LittleEndian.Uint32(p[520:524])
+		d.Fields["result"] = int32(binary.LittleEndian.Uint32(p[524:528]))
+		d.Fields["path_src"] = pathSrcNames[p[528]]
 	case 5: // unlink
-		if !need(264) {
+		if !need(520) {
 			return nil, fmt.Errorf("unlink payload short")
 		}
-		d.Fields["path"] = cstr(p[0:256])
-		d.Fields["result"] = int32(binary.LittleEndian.Uint32(p[256:260]))
-		d.Fields["path_src"] = pathSrcNames[p[260]]
+		d.Fields["path"] = cstr(p[0:512])
+		d.Fields["result"] = int32(binary.LittleEndian.Uint32(p[512:516]))
+		d.Fields["path_src"] = pathSrcNames[p[516]]
 	case 6: // rename
-		if !need(520) {
+		if !need(1032) {
 			return nil, fmt.Errorf("rename payload short")
 		}
-		d.Fields["old_path"] = cstr(p[0:256])
-		d.Fields["new_path"] = cstr(p[256:512])
-		d.Fields["result"] = int32(binary.LittleEndian.Uint32(p[512:516]))
-		d.Fields["old_path_src"] = pathSrcNames[p[516]]
-		d.Fields["new_path_src"] = pathSrcNames[p[517]]
+		d.Fields["old_path"] = cstr(p[0:512])
+		d.Fields["new_path"] = cstr(p[512:1024])
+		d.Fields["result"] = int32(binary.LittleEndian.Uint32(p[1024:1028]))
+		d.Fields["old_path_src"] = pathSrcNames[p[1028]]
+		d.Fields["new_path_src"] = pathSrcNames[p[1029]]
 	case 7: // chmod
-		if !need(272) {
+		if !need(528) {
 			return nil, fmt.Errorf("chmod payload short")
 		}
-		d.Fields["path"] = cstr(p[0:256])
-		d.Fields["mode"] = fmt.Sprintf("%#o", binary.LittleEndian.Uint32(p[256:260]))
-		d.Fields["result"] = int32(binary.LittleEndian.Uint32(p[260:264]))
-		d.Fields["path_src"] = pathSrcNames[p[264]]
+		d.Fields["path"] = cstr(p[0:512])
+		d.Fields["mode"] = fmt.Sprintf("%#o", binary.LittleEndian.Uint32(p[512:516]))
+		d.Fields["result"] = int32(binary.LittleEndian.Uint32(p[516:520]))
+		d.Fields["path_src"] = pathSrcNames[p[520]]
 	case 8, 9: // file_close / file_io (flush)
-		if !need(296) {
+		if !need(552) {
 			return nil, fmt.Errorf("file_close payload short")
 		}
-		d.Fields["path"] = cstr(p[0:256])
-		d.Fields["file_ptr"] = fmt.Sprintf("%#x", binary.LittleEndian.Uint64(p[256:264]))
-		d.Fields["read_bytes"] = binary.LittleEndian.Uint64(p[264:272])
-		d.Fields["write_bytes"] = binary.LittleEndian.Uint64(p[272:280])
-		d.Fields["path_src"] = pathSrcNames[p[288]]
+		d.Fields["path"] = cstr(p[0:512])
+		d.Fields["file_ptr"] = fmt.Sprintf("%#x", binary.LittleEndian.Uint64(p[512:520]))
+		d.Fields["read_bytes"] = binary.LittleEndian.Uint64(p[520:528])
+		d.Fields["write_bytes"] = binary.LittleEndian.Uint64(p[528:536])
+		if openTS := binary.LittleEndian.Uint64(p[536:544]); openTS > 0 && d.TsNS >= openTS {
+			d.Fields["duration_ms"] = (d.TsNS - openTS) / 1_000_000
+		}
+		d.Fields["path_src"] = pathSrcNames[p[544]]
 		if d.Type == 9 {
 			d.Fields["partial"] = true
 		}
@@ -177,6 +180,9 @@ func Decode(raw []byte) (*Decoded, error) {
 		d.Fields["dport"] = binary.LittleEndian.Uint16(p[32:34])
 		d.Fields["sport"] = binary.LittleEndian.Uint16(p[34:36])
 		d.Fields["protocol"] = p[38]
+		if p[39]&1 != 0 {
+			d.Fields["dns"] = true
+		}
 		d.Fields["result"] = int32(binary.LittleEndian.Uint32(p[40:44]))
 		if family == 2 {
 			d.Fields["daddr"] = net.IP(p[0:4]).String()
@@ -248,14 +254,52 @@ type pendingSession struct {
 // reject or timeout the buffer is discarded and the kernel session is
 // tombstoned REJECTED via the SessionControl.
 type Processor struct {
-	mu         sync.Mutex
-	ctrl       SessionControl
-	write      func(Output) error
-	wallBase   time.Time // wall clock corresponding to monotonic 0
-	pending    map[uint64]*pendingSession
-	decided    map[uint64]bool // session -> confirmed(true)/rejected(false)
-	started    map[uint64]bool
-	droppedBuf int
+	mu              sync.Mutex
+	ctrl            SessionControl
+	write           func(Output) error
+	wallBase        time.Time // wall clock corresponding to monotonic 0
+	pending         map[uint64]*pendingSession
+	decided         map[uint64]bool // session -> confirmed(true)/rejected(false)
+	started         map[uint64]bool
+	droppedBuf      int
+	DropPrefixes    []string // file paths with any of these prefixes are dropped
+	droppedFiltered int
+}
+
+// DroppedFiltered reports how many events --drop-path-prefix suppressed.
+func (p *Processor) DroppedFiltered() int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.droppedFiltered
+}
+
+func (p *Processor) shouldDrop(d *Decoded) bool {
+	if len(p.DropPrefixes) == 0 {
+		return false
+	}
+	var paths []string
+	switch d.Type {
+	case 4, 5, 7, 8, 9:
+		if s, ok := d.Fields["path"].(string); ok {
+			paths = append(paths, s)
+		}
+	case 6:
+		for _, k := range []string{"old_path", "new_path"} {
+			if s, ok := d.Fields[k].(string); ok {
+				paths = append(paths, s)
+			}
+		}
+	default:
+		return false
+	}
+	for _, path := range paths {
+		for _, pre := range p.DropPrefixes {
+			if pre != "" && strings.HasPrefix(path, pre) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func NewProcessor(ctrl SessionControl, wallBase time.Time, write func(Output) error) *Processor {
@@ -301,6 +345,14 @@ func (p *Processor) emitLocked(d *Decoded, provisional bool) {
 			end := p.toOutput(d, false)
 			end.Type = "session_end"
 			end.Fields = map[string]any{}
+			if cp, ok := p.ctrl.(interface {
+				SessionCPU(uint64) (uint64, uint64, bool)
+			}); ok {
+				if u, s, ok := cp.SessionCPU(d.SessionID); ok {
+					end.Fields["cpu_user_ms"] = u
+					end.Fields["cpu_sys_ms"] = s
+				}
+			}
 			_ = p.write(end)
 			delete(p.started, d.SessionID)
 		}
@@ -346,6 +398,10 @@ func (p *Processor) Process(d *Decoded) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
+	if p.shouldDrop(d) {
+		p.droppedFiltered++
+		return
+	}
 	if confirmed, decided := p.decided[d.SessionID]; decided {
 		if !confirmed {
 			return // rejected session: drop stragglers

@@ -56,7 +56,7 @@
 #ifndef AGENTLOUPE_H
 #define AGENTLOUPE_H
 
-#define AGENTLOUPE_ABI_VERSION 1
+#define AGENTLOUPE_ABI_VERSION 2
 
 /* Minimum kernel for full (LSM) mode; the loader enforces this, the
  * header only documents it. Fallback floor is 5.8. */
@@ -76,8 +76,8 @@
 /* ---- Fixed string sizes (truncation is flagged, never silent) ---------- */
 #define TASK_COMM_LEN_AL     16     /* matches kernel TASK_COMM_LEN       */
 #define AGENT_NAME_LEN       32
-#define MAX_PATH_LEN         256    /* file paths, exec filename, cwd     */
-#define MAX_ARGV_LEN         256    /* NUL-joined argv, exec events only  */
+#define MAX_PATH_LEN         512    /* file paths, exec filename, cwd     */
+#define MAX_ARGV_LEN         512    /* NUL-joined argv, exec events only  */
 #define MAX_ARGV_ARGS        16     /* argv entries copied at most        */
 
 /* Bounded dentry walk for the tracepoint fallback (scope.h). At the cap,
@@ -244,7 +244,7 @@ struct fd_info {
 	__u32 dev;                        /* kernel dev_t encoding, as binary_id */
 	__u8  path_src;                   /* enum path_source                  */
 	__u8  _pad[3];
-};                                        /* 312 bytes                         */
+};                                        /* 568 bytes                         */
 
 /* Syscall summary (optional probe): counts only, never events. */
 struct syscall_key {
@@ -317,7 +317,8 @@ struct agentloupe_config {
 	__u32 enable_syscall_summary;     /* gates raw_syscalls:sys_enter body */
 	__u32 enable_file_io_accounting;  /* gates vfs_read/write(v) probes    */
 	__u32 enable_file_mutations;      /* gates unlink/rename/chmod fallback */
-	__u32 _pad;
+	__u32 net_udp_only;               /* enter_connect emits SOCK_DGRAM only
+	                                   * (set when TCP fexit probes attached) */
 };
 
 /* ---- Event records -------------------------------------------------------
@@ -373,7 +374,7 @@ struct ev_exec {
 	__u8  cwd_src;                    /* enum path_source                  */
 	__u16 _pad;
 	__u32 _pad2;
-};                                        /* 792 bytes                         */
+};                                        /* 1560 bytes                        */
 
 struct ev_fork {
 	__u32 child_tgid;                 /* host TGID of the new process      */
@@ -396,14 +397,14 @@ struct ev_file_open {
 	__u8  path_src;                   /* enum path_source                  */
 	__u8  _pad[3];
 	__u32 _pad2;
-};                                        /* 280 bytes                         */
+};                                        /* 536 bytes                         */
 
 struct ev_file_unlink {
 	char  path[MAX_PATH_LEN];
 	__s32 result;
 	__u8  path_src;
 	__u8  _pad[3];
-};                                        /* 264 bytes                         */
+};                                        /* 520 bytes                         */
 
 struct ev_file_rename {
 	char  old_path[MAX_PATH_LEN];
@@ -412,7 +413,7 @@ struct ev_file_rename {
 	__u8  old_path_src;
 	__u8  new_path_src;
 	__u16 _pad;
-};                                        /* 520 bytes                         */
+};                                        /* 1032 bytes                        */
 
 struct ev_file_chmod {
 	char  path[MAX_PATH_LEN];
@@ -421,7 +422,7 @@ struct ev_file_chmod {
 	__u8  path_src;
 	__u8  _pad[3];
 	__u32 _pad2;
-};                                        /* 272 bytes                         */
+};                                        /* 528 bytes                         */
 
 struct ev_file_close {
 	char  path[MAX_PATH_LEN];
@@ -432,7 +433,7 @@ struct ev_file_close {
 	                                   * one open across flush + close     */
 	__u8  path_src;
 	__u8  _pad[7];
-};                                        /* 296 bytes                         */
+};                                        /* 552 bytes                         */
 
 struct ev_net_connect {
 	__u8  daddr[16];                  /* IPv4 in first 4 bytes if family=2 */
@@ -441,7 +442,7 @@ struct ev_net_connect {
 	__u16 sport;                      /* 0 if not yet bound/unknown        */
 	__u16 family;                     /* AF_INET / AF_INET6                */
 	__u8  protocol;                   /* IPPROTO_TCP / UDP                 */
-	__u8  _pad;
+	__u8  flags;                      /* bit0: DNS (dport 53)              */
 	__s32 result;                     /* connect() result where available  */
 	__s32 _pad2;
 };                                        /* 48 bytes                          */
@@ -462,13 +463,13 @@ struct ev_net_connect {
  * and update the Go decoder in the same commit. `make check-header` verifies
  * them with a host compiler, no kernel or libbpf needed. */
 _Static_assert(sizeof(struct event_hdr) == 72, "event_hdr ABI changed");
-_Static_assert(sizeof(struct ev_exec) == 792, "ev_exec ABI changed");
-_Static_assert(sizeof(struct ev_file_open) == 280, "ev_file_open ABI changed");
-_Static_assert(sizeof(struct ev_file_chmod) == 272, "ev_file_chmod ABI changed");
-_Static_assert(sizeof(struct ev_file_close) == 296, "ev_file_close ABI changed");
+_Static_assert(sizeof(struct ev_exec) == 1560, "ev_exec ABI changed");
+_Static_assert(sizeof(struct ev_file_open) == 536, "ev_file_open ABI changed");
+_Static_assert(sizeof(struct ev_file_chmod) == 528, "ev_file_chmod ABI changed");
+_Static_assert(sizeof(struct ev_file_close) == 552, "ev_file_close ABI changed");
 _Static_assert(sizeof(struct session_info) == 88, "session_info ABI changed");
 _Static_assert(sizeof(struct tracked_session) == 8, "tracked_session ABI changed");
-_Static_assert(sizeof(struct fd_info) == 312, "fd_info ABI changed");
+_Static_assert(sizeof(struct fd_info) == 568, "fd_info ABI changed");
 
 /* ---- Maps ----------------------------------------------------------------
  * All maps are defined here (not per-program) so every program sees

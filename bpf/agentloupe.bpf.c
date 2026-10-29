@@ -623,6 +623,32 @@ static __always_inline struct file *task_file_from_fd(struct task_struct *task, 
 	return f;
 }
 
+/* Socket type (SOCK_STREAM/SOCK_DGRAM/...) for an fd of the current task,
+ * or -1 if the fd is not a socket. Used to keep UDP connects visible when
+ * TCP is already covered by the tcp_* fexit probes. */
+static __always_inline int socket_type_from_fd(int fd)
+{
+	struct file *f = task_file_from_fd(cur_task(), fd);
+	struct inode *inode;
+	void *priv;
+	short type = -1;
+
+	if (!f)
+		return -1;
+	inode = BPF_CORE_READ(f, f_inode);
+	if (!inode)
+		return -1;
+	if ((BPF_CORE_READ(inode, i_mode) & 0170000) != 0140000) /* S_IFSOCK */
+		return -1;
+	priv = BPF_CORE_READ(f, private_data);
+	if (!priv)
+		return -1;
+	if (bpf_core_read(&type, sizeof(type),
+			  &((struct socket *)priv)->type) < 0)
+		return -1;
+	return (int)type;
+}
+
 static __always_inline int pending_finish(long ret, __u32 op)
 {
 	struct session_info info = {};
@@ -935,6 +961,8 @@ emit_net_connect(struct sock *sk, __u32 result, bool have_result)
 		__builtin_memcpy(ev->saddr, &saddr6, 16);
 	}
 	ev->dport = bpf_ntohs(BPF_CORE_READ(sk, __sk_common.skc_dport));
+	if (ev->dport == 53)
+		ev->flags |= 1; /* DNS */
 	ev->result = have_result ? (__s32)result : 0;
 	submit_event(hdr, EVENT_NET_CONNECT);
 }
@@ -962,10 +990,10 @@ int BPF_PROG(handle_tcp_v6_connect, struct sock *sk, struct sockaddr *uaddr,
 	return 0;
 }
 
-/* Syscall fallback / UDP visibility: parses the userspace sockaddr at
- * enter. Loader attaches EITHER the tcp_* kprobes (TCP, kernel-side
- * sockaddr, default) OR this (all protocols incl. UDP, no result),
- * not both, to avoid double-reporting TCP connects. */
+/* Syscall network probe: parses the userspace sockaddr at enter.
+ * Always attached by the loader. When the tcp_* fexit probes are live
+ * the loader sets config net_udp_only and this emits SOCK_DGRAM only
+ * (no TCP double-report); otherwise it emits every connect. */
 SEC("tp/syscalls/sys_enter_connect")
 int handle_enter_connect(struct sys_enter_ctx *ctx)
 {
@@ -979,25 +1007,39 @@ int handle_enter_connect(struct sys_enter_ctx *ctx)
 
 	if (!resolve_scope(tgid, cur_task(), &sid, &info, &cgid))
 		return 0;
-	if (bpf_probe_read_user(sa, sizeof(sa), (const void *)ctx->args[1]) < 0)
-		return 0;
-	family = (__u16)sa[0] | ((__u16)sa[1] << 8);
-	if (family != AF_INET && family != AF_INET6)
-		return 0;
-	hdr = reserve_event(EVENT_NET_CONNECT, EVLEN_NET_CONNECT, sid, &info,
-			    cur_task(), tgid);
-	if (!hdr)
-		return 0;
-	ev = (struct ev_net_connect *)(void *)(hdr + 1);
-	ev->family = family;
-	if (family == AF_INET) {
-		/* sockaddr_in: port at 2 (BE), addr at 4 */
-		ev->dport = ((__u16)sa[2] << 8) | sa[3];
-		__builtin_memcpy(ev->daddr, &sa[4], 4);
-	} else {
-		/* sockaddr_in6: port at 2 (BE), addr at 8 */
-		ev->dport = ((__u16)sa[2] << 8) | sa[3];
-		__builtin_memcpy(ev->daddr, &sa[8], 16);
+	/* When the TCP fexit probes are attached the loader sets net_udp_only:
+	 * emit SOCK_DGRAM only, so TCP is not double-reported. Otherwise
+	 * (fallback) emit every connect, tagged with its protocol. */
+	{
+		int stype = socket_type_from_fd((int)ctx->args[0]);
+
+		if (cfg_enabled(4)) {
+			if (stype != 2) /* SOCK_DGRAM */
+				return 0;
+		}
+		if (bpf_probe_read_user(sa, sizeof(sa), (const void *)ctx->args[1]) < 0)
+			return 0;
+		family = (__u16)sa[0] | ((__u16)sa[1] << 8);
+		if (family != AF_INET && family != AF_INET6)
+			return 0;
+		hdr = reserve_event(EVENT_NET_CONNECT, EVLEN_NET_CONNECT, sid, &info,
+				    cur_task(), tgid);
+		if (!hdr)
+			return 0;
+		ev = (struct ev_net_connect *)(void *)(hdr + 1);
+		ev->family = family;
+		ev->protocol = (stype == 2) ? 17 : 6; /* IPPROTO_UDP / TCP */
+		if (family == AF_INET) {
+			/* sockaddr_in: port at 2 (BE), addr at 4 */
+			ev->dport = ((__u16)sa[2] << 8) | sa[3];
+			__builtin_memcpy(ev->daddr, &sa[4], 4);
+		} else {
+			/* sockaddr_in6: port at 2 (BE), addr at 8 */
+			ev->dport = ((__u16)sa[2] << 8) | sa[3];
+			__builtin_memcpy(ev->daddr, &sa[8], 16);
+		}
+		if (ev->dport == 53)
+			ev->flags |= 1; /* DNS */
 	}
 	submit_event(hdr, EVENT_NET_CONNECT);
 	return 0;

@@ -13,11 +13,32 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
 	"github.com/InfraMatrix/AgentLoupe/internal/app"
 )
+
+type multiFlag []string
+
+func (m *multiFlag) String() string { return strings.Join(*m, ",") }
+func (m *multiFlag) Set(v string) error {
+	*m = append(*m, v)
+	return nil
+}
+
+type multiInt []int
+
+func (m *multiInt) String() string { return fmt.Sprint([]int(*m)) }
+func (m *multiInt) Set(v string) error {
+	var n int
+	if _, err := fmt.Sscan(v, &n); err != nil {
+		return err
+	}
+	*m = append(*m, n)
+	return nil
+}
 
 func main() {
 	var o app.Options
@@ -30,7 +51,20 @@ func main() {
 	flag.BoolVar(&o.EnableSyscallSummary, "enable-syscall-summary", false, "opt-in: per-(session, syscall) counts via raw_tp/sys_enter")
 	flag.BoolVar(&o.EnableFileMutations, "enable-file-mutations", false, "opt-in: unlink/rename/chmod events (default probes are process, file-open, network only)")
 	flag.DurationVar(&o.StatsInterval, "stats-interval", 10*time.Second, "how often to print drop/map-full counters (0 = only on shutdown)")
+	var dropPrefixes, attachComms, attachExes, catalogOnly multiFlag
+	var attachPIDs multiInt
+	flag.Var(&dropPrefixes, "drop-path-prefix", "drop file events whose path has this prefix (repeatable; e.g. /proc/)")
+	flag.Var(&attachPIDs, "attach-pid", "adopt this already-running PID and its children (repeatable)")
+	flag.Var(&attachComms, "attach-comm", "adopt running processes with this comm/exe basename (repeatable)")
+	flag.Var(&attachExes, "attach-exe", "adopt running processes whose /proc/<pid>/exe matches this path or glob (repeatable)")
+	flag.BoolVar(&o.UseCatalog, "catalog", false, "enable the built-in catalog of known agent harnesses")
+	flag.Var(&catalogOnly, "catalog-only", "enable only this catalog entry (repeatable; implies --catalog)")
 	flag.Parse()
+	o.DropPathPrefixes = dropPrefixes
+	o.AttachPIDs = attachPIDs
+	o.AttachComms = attachComms
+	o.AttachExes = attachExes
+	o.CatalogOnly = catalogOnly
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()

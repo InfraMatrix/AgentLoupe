@@ -1,0 +1,19 @@
+# Demo config — created because the run referenced this path but it did
+# not exist, so AgentLoupe ran with an empty scope and dropped everything.
+agents:
+  # Reliable demo: any `python3 ...loupe_demo...` process is confirmed
+  # from argv (kernel matches the interpreter inode, userspace confirms
+  # the marker, children inherit the session).
+  - name: loupe-demo-python
+    kind: tool
+    match:
+      interpreter: /usr/bin/python3
+      argv_contains: loupe_demo
+
+  # Claude Code itself, matched by binary inode. Note: if this path is a
+  # wrapper/script, the exec'd inode will be the real interpreter/binary,
+  # not this path — the python rule above is the guaranteed demo.
+  - name: claude-code
+    kind: tool
+    match:
+      exec_path: /home/leonematt/.local/bin/claude
