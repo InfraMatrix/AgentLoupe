@@ -161,7 +161,7 @@ struct binary_id {
 	__u32 dev;
 	__u32 _pad;
 	__u64 ino;
-};
+};                                        /* 16 bytes                          */
 
 /* What a matched binary/cgroup resolves to. agent_name is copied into the
  * session_info at creation so probes never need a second lookup to stamp
@@ -169,7 +169,7 @@ struct binary_id {
 struct agent_ref {
 	__u32 rule_id;                    /* index into userspace config       */
 	char  agent_name[AGENT_NAME_LEN];
-};
+};                                        /* 36 bytes                          */
 
 /* Kernel-side session state: session_id -> metadata + lifecycle state.
  * Parent linkage and agent metadata live HERE, not in tracked_sessions.

@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/inframatrix/agentloupe/internal/config"
+	"github.com/InfraMatrix/AgentLoupe/internal/config"
 )
 
 // Event type numbers mirror enum event_type in bpf/agentloupe.h.
@@ -25,17 +25,17 @@ var pathSrcNames = map[uint8]string{
 }
 
 type Decoded struct {
-	Type       uint16
-	Flags      uint16
-	TsNS       uint64
-	SessionID  uint64
-	ParentSID  uint64
-	Tgid       uint32
-	PIDInNS    uint32
-	PPID       uint32
-	UID        uint32
-	Comm       string
-	Fields     map[string]any
+	Type        uint16
+	Flags       uint16
+	TsNS        uint64
+	SessionID   uint64
+	ParentSID   uint64
+	Tgid        uint32
+	PIDInNS     uint32
+	PPID        uint32
+	UID         uint32
+	Comm        string
+	Fields      map[string]any
 	Provisional bool
 }
 
@@ -248,13 +248,13 @@ type pendingSession struct {
 // reject or timeout the buffer is discarded and the kernel session is
 // tombstoned REJECTED via the SessionControl.
 type Processor struct {
-	mu        sync.Mutex
-	ctrl      SessionControl
-	write     func(Output) error
-	wallBase  time.Time // wall clock corresponding to monotonic 0
-	pending   map[uint64]*pendingSession
-	decided   map[uint64]bool // session -> confirmed(true)/rejected(false)
-	started   map[uint64]bool
+	mu         sync.Mutex
+	ctrl       SessionControl
+	write      func(Output) error
+	wallBase   time.Time // wall clock corresponding to monotonic 0
+	pending    map[uint64]*pendingSession
+	decided    map[uint64]bool // session -> confirmed(true)/rejected(false)
+	started    map[uint64]bool
 	droppedBuf int
 }
 

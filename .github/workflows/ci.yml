@@ -1,0 +1,43 @@
+name: CI
+
+# Unit tests, vet, and lint on every PR. No kernel, no root, no BPF
+# compilation here — the real-kernel integration test runs locally via
+# `sudo make integration` (see README).
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: go test + vet
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - run: go test ./...
+      - run: go vet ./...
+
+  lint:
+    name: staticcheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Pin Go to the version verified against the staticcheck release
+      # below — do NOT float on `stable`: staticcheck's bundled x/tools
+      # cannot parse export data from newer Go releases (CI broke with
+      # "export data version 5 is greater than maximum supported
+      # version 2" when stable moved ahead). Bump Go and staticcheck
+      # together, and only after verifying the pair locally.
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.x"
+          cache: true
+      - run: go run honnef.co/go/tools/cmd/staticcheck@2025.1.1 ./...

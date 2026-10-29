@@ -14,25 +14,25 @@ import (
 	"github.com/cilium/ebpf/link"
 	"github.com/cilium/ebpf/ringbuf"
 
-	"github.com/inframatrix/agentloupe/internal/config"
+	"github.com/InfraMatrix/AgentLoupe/internal/config"
 )
 
 type Options struct {
-	BPFObject          string
-	ConfigPath         string
-	Output             string
-	EnableIOAccounting bool
+	BPFObject            string
+	ConfigPath           string
+	Output               string
+	EnableIOAccounting   bool
 	EnableSyscallSummary bool
 	EnableFileMutations  bool
-	StatsInterval      time.Duration
+	StatsInterval        time.Duration
 }
 
 type progReq struct {
-	Name  string // Go-visible program (function) name in the object
-	Kind  string // raw_tp | tracepoint | kprobe | lsm | fexit
-	Group string // tracepoint group, when Kind == tracepoint
+	Name   string // Go-visible program (function) name in the object
+	Kind   string // raw_tp | tracepoint | kprobe | lsm | fexit
+	Group  string // tracepoint group, when Kind == tracepoint
 	Target string // symbol / tracepoint name
-	Tag   string // core | mutation | io | syscall | netkprobe
+	Tag    string // core | mutation | io | syscall | netkprobe
 }
 
 func buildRequests(lsmMode bool, o Options) []progReq {
@@ -243,7 +243,6 @@ func Run(ctx context.Context, o Options) error {
 		defer writeMu.Unlock()
 		return enc.Write(rec)
 	}
-	_ = writeMu
 
 	reqs := buildRequests(lsmMode, o)
 	coll, useReqs, attemptLabel, err := loadCollection(o.BPFObject, reqs, logf)

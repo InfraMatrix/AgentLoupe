@@ -27,9 +27,9 @@ type statVal struct{ Emitted, Drops uint64 }
 
 type agentCounters struct {
 	TrackedFailed, SessionsFailed, FileInfoFailed, SyscallFailed, AllocFailed uint64
-	ExecHookRuns, ExecOutOfScope                                               uint64
-	ExecNoFile, ExecBinaryMiss, ExecLastDev, ExecLastIno                       uint64
-	FilePendingStored, FilePendingMatched                                      uint64
+	ExecHookRuns, ExecOutOfScope                                              uint64
+	ExecNoFile, ExecBinaryMiss, ExecLastDev, ExecLastIno                      uint64
+	FilePendingStored, FilePendingMatched                                     uint64
 }
 
 func possibleCPUs() int {
