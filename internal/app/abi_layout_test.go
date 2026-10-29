@@ -153,6 +153,12 @@ type fdInfoMirror struct {
 	Pad        [3]uint8
 }
 
+type syscallKeyMirror struct {
+	SessionID uint64
+	TGID      uint32
+	Nr        uint32
+}
+
 type binaryIDMirror struct {
 	Dev uint32
 	Pad uint32
@@ -181,6 +187,7 @@ func goStructSizes() map[string]uintptr {
 		"fd_info":         unsafe.Sizeof(fdInfoMirror{}),
 		"binary_id":       unsafe.Sizeof(binaryIDMirror{}),
 		"agent_ref":       unsafe.Sizeof(agentRefMirror{}),
+		"syscall_key":     unsafe.Sizeof(syscallKeyMirror{}),
 	}
 }
 
@@ -235,6 +242,7 @@ func TestStructSizesMatchCHeader(t *testing.T) {
 		"event_hdr", "ev_exec", "ev_fork", "ev_exit", "ev_file_open",
 		"ev_file_unlink", "ev_file_rename", "ev_file_chmod", "ev_file_close",
 		"ev_net_connect", "session_info", "tracked_session", "fd_info",
+		"syscall_key",
 	} {
 		if _, ok := cSizes[name]; !ok {
 			t.Errorf("C header no longer declares a size for struct %s; update this test with the ABI change", name)
@@ -302,6 +310,8 @@ func TestStructOffsetsMatchDecoder(t *testing.T) {
 		{"fd_info.opener_tgid (raw[552:556])", unsafe.Offsetof(fdInfoMirror{}.OpenerTGID), 552},
 		{"fd_info.path_src (raw[564])", unsafe.Offsetof(fdInfoMirror{}.PathSrc), 564},
 		{"binary_id.ino (key[8:16])", unsafe.Offsetof(binaryIDMirror{}.Ino), 8},
+		{"syscall_key.tgid (key[8:12])", unsafe.Offsetof(syscallKeyMirror{}.TGID), 8},
+		{"syscall_key.syscall_nr (key[12:16])", unsafe.Offsetof(syscallKeyMirror{}.Nr), 12},
 		{"agent_ref.agent_name (v[4:36])", unsafe.Offsetof(agentRefMirror{}.AgentName), 4},
 	}
 	for _, tt := range tests {
@@ -344,9 +354,9 @@ func TestABIVersionMatchesHeader(t *testing.T) {
 	if m == nil {
 		t.Fatal("AGENTLOUPE_ABI_VERSION not found in bpf/agentloupe.h")
 	}
-	// Decode rejects anything but version 2 (see TestDecodeMalformed);
+	// Decode rejects anything but version 3 (see TestDecodeMalformed);
 	// if the header bumps the version, the decoder must move with it.
-	if string(m[1]) != "2" {
-		t.Errorf("AGENTLOUPE_ABI_VERSION = %s, but the Go decoder only accepts 2", m[1])
+	if string(m[1]) != "3" {
+		t.Errorf("AGENTLOUPE_ABI_VERSION = %s, but the Go decoder only accepts 3", m[1])
 	}
 }

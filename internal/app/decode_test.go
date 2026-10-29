@@ -27,7 +27,7 @@ func buildRecord(typ uint16, flags uint16, payload []byte) []byte {
 	raw := make([]byte, 72+len(payload))
 	binary.LittleEndian.PutUint16(raw[0:2], typ)
 	binary.LittleEndian.PutUint16(raw[2:4], uint16(len(raw))) // hdr.size
-	binary.LittleEndian.PutUint16(raw[4:6], 2)                // ABI version
+	binary.LittleEndian.PutUint16(raw[4:6], 3)                // ABI version
 	binary.LittleEndian.PutUint16(raw[6:8], flags)
 	binary.LittleEndian.PutUint64(raw[8:16], 123456789) // ts_ns
 	binary.LittleEndian.PutUint64(raw[16:24], 42)       // session_id
@@ -445,7 +445,8 @@ func TestDecodeMalformed(t *testing.T) {
 		{"one byte", []byte{1}, "short record"},
 		{"71 bytes (header truncated)", make([]byte, 71), "short record"},
 		{"bad abi version 0", withVersion(buildRecord(2, 0, make([]byte, 8)), 0), "abi version 0"},
-		{"bad abi version 3", withVersion(buildRecord(2, 0, make([]byte, 8)), 3), "abi version 3"},
+		{"bad abi version 2", withVersion(buildRecord(2, 0, make([]byte, 8)), 2), "abi version 2"},
+		{"bad abi version 4", withVersion(buildRecord(2, 0, make([]byte, 8)), 4), "abi version 4"},
 		{"size below header", withSize(buildRecord(2, 0, make([]byte, 8)), 71), "bad record size 71"},
 		{"size zero", withSize(buildRecord(2, 0, make([]byte, 8)), 0), "bad record size 0"},
 		{"size beyond buffer", withSize(buildRecord(2, 0, make([]byte, 8)), 999), "bad record size 999"},

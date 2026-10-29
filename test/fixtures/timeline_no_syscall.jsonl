@@ -1,0 +1,5 @@
+{"ts":"2026-01-01T00:00:00Z","type":"session_start","session_id":7,"agent_name":"old-agent","comm":"python3","pid":500,"ppid":1}
+{"ts":"2026-01-01T00:00:00Z","type":"exec","session_id":7,"agent_name":"old-agent","comm":"python3","pid":500,"ppid":1,"filename":"/usr/bin/python3"}
+{"ts":"2026-01-01T00:00:01Z","type":"file_open","session_id":7,"agent_name":"old-agent","comm":"python3","pid":500,"ppid":1,"path":"/tmp/old.txt"}
+{"ts":"2026-01-01T00:00:02Z","type":"exit","session_id":7,"agent_name":"old-agent","comm":"python3","pid":500,"ppid":1}
+{"ts":"2026-01-01T00:00:02Z","type":"session_end","session_id":7,"agent_name":"old-agent","comm":"python3","pid":500,"ppid":1}
