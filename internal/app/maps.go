@@ -14,7 +14,7 @@ import (
 	"github.com/cilium/ebpf"
 	"golang.org/x/sys/unix"
 
-	"github.com/inframatrix/agentloupe/internal/config"
+	"github.com/InfraMatrix/AgentLoupe/internal/config"
 )
 
 // ---- kernel ABI byte encodings (must mirror bpf/agentloupe.h) ----
@@ -246,7 +246,7 @@ func boolToU32(b bool) uint32 {
 // SetConfig swaps the active rule set (live reload). Rules() is the
 // SessionControl view used by the event processor.
 func (l *Loader) SetConfig(cfg *config.File) { l.cfg = cfg }
-func (l *Loader) Rules() *config.File       { return l.cfg }
+func (l *Loader) Rules() *config.File        { return l.cfg }
 
 // populateRules (re)resolves the config into agent_binaries / candidates /
 // agent_cgroups, deleting keys that disappeared since the last call so

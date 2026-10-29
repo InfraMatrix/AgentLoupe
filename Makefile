@@ -1,19 +1,58 @@
 # AgentLoupe — build orchestration.
 #
-# Targets:
-#   make check-header  Compile-check bpf/agentloupe.h (incl. _Static_asserts)
-#                      with a host compiler. No kernel, libbpf, or root needed.
-#   make vmlinux.h     Regenerate bpf/vmlinux.h from the RUNNING kernel's BTF.
-#                      Run this on the target/VM kernel, not blindly on a dev host.
-#   make bpf           Compile bpf/agentloupe.bpf.c -> bpf/agentloupe.bpf.o (CO-RE).
-#   make generate      Run bpf2go to regenerate the Go bindings (Stage 3).
-#   make loader        Build the Go loader (Stage 3).
-#   make bench-io      Plan/target stub: fexit vfs_* overhead benchmark (Stage 3 gate).
+# Canonical targets:
+#   make build        Compile the BPF object, then build ./agentloupe.
+#   make bpf          Compile bpf/agentloupe.bpf.c -> bpf/agentloupe.bpf.o (CO-RE).
+#   make test         Unit tests only: no kernel, no root (go test ./...).
+#   make integration  Real-kernel integration test. Run as: sudo make integration
+#
+# Supporting targets:
+#   make check        Header ABI asserts + LSM return-0 safety checks.
+#   make vmlinux.h    Regenerate bpf/vmlinux.h from the RUNNING kernel's BTF.
+#                     Run this on the target kernel, not blindly on a dev host.
+#   make vet          go vet ./...
+#   make bench-io     Plan/target stub: fexit vfs_* overhead benchmark.
+#   make clean        Remove build artifacts.
+#
+# There is intentionally no code-generation target: the loader consumes the
+# compiled BPF object directly via cilium/ebpf (ebpf.LoadCollectionSpec), so
+# no bpf2go bindings are generated or committed.
 
-ARCH ?= $(shell uname -m | sed 's/x86_64/x86/' | sed 's/aarch64/arm64/')
+GO      ?= go
+ARCH    ?= $(shell uname -m | sed 's/x86_64/x86/' | sed 's/aarch64/arm64/')
 BPF_CFLAGS := -O2 -g -Wall -Werror -Wno-missing-declarations -target bpf -D__TARGET_ARCH_$(ARCH) -I bpf -I /usr/include/$(shell uname -m)-linux-gnu
-CLANG ?= clang
+CLANG   ?= clang
 BPFTOOL ?= bpftool
+
+.PHONY: build
+build: bpf
+	$(GO) build -o agentloupe ./cmd/agentloupe
+
+bpf/agentloupe.bpf.o: bpf/agentloupe.bpf.c bpf/agentloupe.h bpf/scope.h bpf/vmlinux.h check-lsm-returns
+	$(CLANG) $(BPF_CFLAGS) -c $< -o $@
+
+.PHONY: bpf
+bpf: bpf/agentloupe.bpf.o
+
+.PHONY: test
+test:
+	$(GO) test ./...
+
+# Integration runs the real-kernel test as root. It deliberately does
+# NOT depend on `build`: run `make build` as your normal user first, so
+# no build artifact (bpf object, binary) is ever created root-owned.
+# The test itself fails with that instruction if the object is missing.
+.PHONY: integration
+integration:
+	$(GO) test -tags integration -count=1 -v -run TestIntegration ./internal/app/
+
+.PHONY: vet
+vet:
+	$(GO) vet ./...
+
+.PHONY: clean
+clean:
+	rm -f agentloupe bpf/agentloupe.bpf.o
 
 .PHONY: check-header
 check-header:
@@ -56,20 +95,6 @@ check: check-header check-lsm-returns check-lsm-returns-selftest
 .PHONY: vmlinux.h
 vmlinux.h:
 	$(BPFTOOL) btf dump file /sys/kernel/btf/vmlinux format c > bpf/vmlinux.h
-
-bpf/agentloupe.bpf.o: bpf/agentloupe.bpf.c bpf/agentloupe.h bpf/scope.h bpf/vmlinux.h check-lsm-returns
-	$(CLANG) $(BPF_CFLAGS) -c $< -o $@
-
-.PHONY: bpf
-bpf: bpf/agentloupe.bpf.o
-
-.PHONY: generate
-generate:
-	cd internal/loader && go generate ./...
-
-.PHONY: loader
-loader: bpf generate
-	go build -o agentloupe ./cmd/agentloupe
 
 # Stage 3 gate: measure fexit/vfs_read{,v} + vfs_write{,v} overhead host-wide
 # under a fio-style I/O load with the hooks attached but no tracked agents,

@@ -176,7 +176,7 @@ emit:
 	if (!hdr)
 		return NULL;
 	ev = (struct ev_exec *)(void *)(hdr + 1);
-	read_argv(task, ev->argv, &ev->argc);
+	read_argv(task, bprm, ev->argv, &ev->argc);
 	/* Audit identity: fields exist only under CONFIG_AUDIT; CO-RE field
 	 * existence keeps this portable. INVALID_UID => loader falls back
 	 * to hdr.uid. */
@@ -194,7 +194,9 @@ emit:
 }
 
 /* Preferred exec hook: sleepable LSM, runs after creds are committed, so
- * bprm->file, the new mm (argv) and fs->pwd are all the NEW image's.
+ * bprm->file is the NEW image's. Note the hook fires (via
+ * install_exec_creds in begin_new_exec) BEFORE setup_arg_pages, so
+ * mm->arg_start/arg_end are not set yet — read_argv uses bprm->p.
  * bpf_d_path is allowlisted here. */
 SEC("lsm.s/bprm_committed_creds")
 int BPF_PROG(handle_bprm_committed_creds, struct linux_binprm *bprm)
@@ -203,7 +205,6 @@ int BPF_PROG(handle_bprm_committed_creds, struct linux_binprm *bprm)
 	struct event_hdr *hdr = NULL;
 	struct ev_exec *ev;
 	struct file *file = NULL;
-	struct path pwd = {};
 	bool partial = false;
 	struct agentloupe_counters *c = counters_ptr();
 
@@ -212,13 +213,28 @@ int BPF_PROG(handle_bprm_committed_creds, struct linux_binprm *bprm)
 	ev = exec_core(task, bprm, &file, &hdr);
 	if (!ev)
 		return 0;
-	if (file) {
-		struct path fp = BPF_CORE_READ(file, f_path);
+	{
+		/* bpf_d_path needs a pointer to a live kernel struct path
+		 * reached via a trusted pointer: re-derive it from the hook
+		 * argument. A BPF_CORE_READ stack copy is type=fp and newer
+		 * verifiers reject it as the bpf_d_path argument.
+		 * task->mm->exe_file and task->fs are __rcu fields, so a
+		 * direct read of them yields untrusted_ptr_ and is rejected
+		 * the same way; when bprm->file is unavailable, and for the
+		 * cwd, fall back to the dentry walk used by the tracepoint
+		 * hook (cwd is then PATH_SRC_DENTRY_WALK: best-effort). */
+		struct file *f = bprm->file;
 
-		ev->filename_src = path_via_dpath(&fp, ev->filename, &partial);
+		if (f)
+			ev->filename_src = path_via_dpath((struct path *)&f->f_path, ev->filename, &partial);
+		else if (file)
+			ev->filename_src = file_path_via_walk(file, ev->filename, &partial);
 	}
-	pwd = BPF_CORE_READ(task, fs, pwd);
-	ev->cwd_src = path_via_dpath(&pwd, ev->cwd, &partial);
+	{
+		struct dentry *pwd_dentry = BPF_CORE_READ(task, fs, pwd.dentry);
+
+		ev->cwd_src = path_via_walk(pwd_dentry, ev->cwd, &partial);
+	}
 	if (partial)
 		hdr->flags |= EVENT_F_PATH_PARTIAL;
 	submit_event(hdr, EVENT_EXEC);
@@ -389,7 +405,6 @@ int BPF_PROG(handle_file_open, struct file *file)
 	struct session_info info = {};
 	struct event_hdr *hdr;
 	struct ev_file_open *ev;
-	struct path fp;
 	__u64 sid = 0, cgid = 0;
 	__u32 tgid = cur_tgid();
 	bool partial = false;
@@ -401,17 +416,19 @@ int BPF_PROG(handle_file_open, struct file *file)
 	if (!hdr)
 		return 0;
 	ev = (struct ev_file_open *)(void *)(hdr + 1);
-	fp = BPF_CORE_READ(file, f_path);
 	ev->file_ptr = (unsigned long)file;
 	ev->flags = BPF_CORE_READ(file, f_flags);
-	ev->path_src = path_via_dpath(&fp, ev->path, &partial);
+	ev->path_src = path_via_dpath((struct path *)&file->f_path, ev->path, &partial);
 	if (partial)
 		hdr->flags |= EVENT_F_PATH_PARTIAL;
-	submit_event(hdr, EVENT_FILE_OPEN);
-
+	/* Create fd attribution BEFORE submit_event: submitting hands the
+	 * ring-buffer record to the kernel, after which ev must not be
+	 * dereferenced (the verifier invalidates the pointer on submit —
+	 * and rightly so: userspace may already be reading the record). */
 	if (!file_is_pseudo(file))
 		file_info_create((unsigned long)file, file, sid, tgid,
 				 ev->flags, ev->path, ev->path_src);
+	submit_event(hdr, EVENT_FILE_OPEN);
 	return 0; /* observe only */
 }
 
@@ -421,7 +438,6 @@ int BPF_PROG(handle_path_unlink, const struct path *path, struct dentry *dentry)
 	struct session_info info = {};
 	struct event_hdr *hdr;
 	struct ev_file_unlink *ev;
-	struct path target;
 	__u64 sid = 0, cgid = 0;
 	__u32 tgid = cur_tgid();
 	bool partial = false;
@@ -433,9 +449,10 @@ int BPF_PROG(handle_path_unlink, const struct path *path, struct dentry *dentry)
 	if (!hdr)
 		return 0;
 	ev = (struct ev_file_unlink *)(void *)(hdr + 1);
-	target.mnt = BPF_CORE_READ(path, mnt);
-	target.dentry = dentry;
-	ev->path_src = path_via_dpath(&target, ev->path, &partial);
+	/* No live struct path names the victim (the hook's path is the
+	 * parent directory), and a fabricated stack copy cannot be given
+	 * to bpf_d_path — walk the victim dentry instead. */
+	ev->path_src = path_via_walk(dentry, ev->path, &partial);
 	if (partial)
 		hdr->flags |= EVENT_F_PATH_PARTIAL;
 	submit_event(hdr, EVENT_FILE_UNLINK);
@@ -449,7 +466,6 @@ int BPF_PROG(handle_path_rename, const struct path *old_path, struct dentry *old
 	struct session_info info = {};
 	struct event_hdr *hdr;
 	struct ev_file_rename *ev;
-	struct path target;
 	__u64 sid = 0, cgid = 0;
 	__u32 tgid = cur_tgid();
 	bool partial = false;
@@ -461,12 +477,9 @@ int BPF_PROG(handle_path_rename, const struct path *old_path, struct dentry *old
 	if (!hdr)
 		return 0;
 	ev = (struct ev_file_rename *)(void *)(hdr + 1);
-	target.mnt = BPF_CORE_READ(old_path, mnt);
-	target.dentry = old_dentry;
-	ev->old_path_src = path_via_dpath(&target, ev->old_path, &partial);
-	target.mnt = BPF_CORE_READ(new_path, mnt);
-	target.dentry = new_dentry;
-	ev->new_path_src = path_via_dpath(&target, ev->new_path, &partial);
+	/* As in path_unlink: walk the dentries; no fabricated struct path. */
+	ev->old_path_src = path_via_walk(old_dentry, ev->old_path, &partial);
+	ev->new_path_src = path_via_walk(new_dentry, ev->new_path, &partial);
 	if (partial)
 		hdr->flags |= EVENT_F_PATH_PARTIAL;
 	submit_event(hdr, EVENT_FILE_RENAME);
@@ -479,7 +492,6 @@ int BPF_PROG(handle_path_chmod, const struct path *path, umode_t mode)
 	struct session_info info = {};
 	struct event_hdr *hdr;
 	struct ev_file_chmod *ev;
-	struct path target;
 	__u64 sid = 0, cgid = 0;
 	__u32 tgid = cur_tgid();
 	bool partial = false;
@@ -491,10 +503,8 @@ int BPF_PROG(handle_path_chmod, const struct path *path, umode_t mode)
 	if (!hdr)
 		return 0;
 	ev = (struct ev_file_chmod *)(void *)(hdr + 1);
-	target.mnt = BPF_CORE_READ(path, mnt);
-	target.dentry = BPF_CORE_READ(path, dentry);
 	ev->mode = mode;
-	ev->path_src = path_via_dpath(&target, ev->path, &partial);
+	ev->path_src = path_via_dpath((struct path *)path, ev->path, &partial);
 	if (partial)
 		hdr->flags |= EVENT_F_PATH_PARTIAL;
 	submit_event(hdr, EVENT_FILE_CHMOD);

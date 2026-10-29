@@ -3,18 +3,20 @@
 package config
 
 import (
+	"bytes"
 	"fmt"
+	"io"
 	"os"
 
 	"gopkg.in/yaml.v3"
 )
 
 type Match struct {
-	ExecPath      string `yaml:"exec_path"`
-	Interpreter   string `yaml:"interpreter"`
-	ArgvContains  string `yaml:"argv_contains"`
-	Cgroup        string `yaml:"cgroup"`
-	K8SLabel      string `yaml:"k8s_label"`
+	ExecPath     string `yaml:"exec_path"`
+	Interpreter  string `yaml:"interpreter"`
+	ArgvContains string `yaml:"argv_contains"`
+	Cgroup       string `yaml:"cgroup"`
+	K8SLabel     string `yaml:"k8s_label"`
 }
 
 type Agent struct {
@@ -41,7 +43,22 @@ func Load(path string) (cfg *File, existed bool, err error) {
 		return nil, false, err
 	}
 	cfg = &File{}
-	if err := yaml.Unmarshal(data, cfg); err != nil {
+	// Strict decoding: an unknown field is almost certainly a typo
+	// (e.g. "execpath:"), and silently ignoring it would produce an
+	// agent that never matches with no error anywhere.
+	dec := yaml.NewDecoder(bytes.NewReader(data))
+	dec.KnownFields(true)
+	if err := dec.Decode(cfg); err != nil {
+		if err == io.EOF { // empty / comments-only file: empty config
+			return cfg, true, nil
+		}
+		return nil, true, fmt.Errorf("parse %s: %w", path, err)
+	}
+	var extra any
+	if err := dec.Decode(&extra); err != io.EOF {
+		if err == nil {
+			return nil, true, fmt.Errorf("parse %s: multiple YAML documents", path)
+		}
 		return nil, true, fmt.Errorf("parse %s: %w", path, err)
 	}
 	for i := range cfg.Agents {

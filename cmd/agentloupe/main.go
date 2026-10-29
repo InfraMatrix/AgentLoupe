@@ -16,7 +16,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/inframatrix/agentloupe/internal/app"
+	"github.com/InfraMatrix/AgentLoupe/internal/app"
 )
 
 func main() {
