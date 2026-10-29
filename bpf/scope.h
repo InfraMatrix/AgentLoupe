@@ -393,7 +393,12 @@ static __always_inline bool file_is_pseudo(struct file *f)
 }
 
 /* bpf_d_path variant — LSM programs ONLY (see header note). Returns the
- * path_source for the payload; sets *partial on truncation/failure. */
+ * path_source for the payload; sets *partial on truncation/failure.
+ * `p` MUST point at a live kernel struct path (e.g. &file->f_path, an LSM
+ * hook's path argument): current verifiers require a trusted/BTF pointer
+ * and reject stack copies (type=fp), which is how this used to be called.
+ * Pointers chased through __rcu fields (task->fs, mm->exe_file) come back
+ * untrusted_ptr_ and are rejected too — use path_via_walk() for those. */
 static __always_inline __u8 path_via_dpath(struct path *p, char *out, bool *partial)
 {
 	long n = bpf_d_path(p, out, MAX_PATH_LEN);
@@ -512,30 +517,62 @@ static __always_inline __u8 file_path_via_walk(struct file *f, char *out, bool *
 	return path_via_walk(dentry, out, partial);
 }
 
-/* Read the linear argv area (mm->arg_start..arg_end holds NUL-separated
- * strings) into dst[MAX_ARGV_LEN]. argc is NOT counted in-kernel: the
- * 256-byte NUL scan cost verifier budget in the exec programs and
- * userspace recovers argc exactly from the parsed argv it already
- * builds (argc field in the payload is left 0). argc_out is kept only
- * so the payload layout/call site stay stable.
+/* Read the linear argv area into dst[MAX_ARGV_LEN]. Normally that is
+ * mm->arg_start..arg_end (NUL-separated strings), but in LSM mode the
+ * bprm_committed_creds hook fires from begin_new_exec, BEFORE
+ * setup_arg_pages() fills those fields in — the range is still empty
+ * there. The strings themselves were already copied onto the new stack
+ * by bprm_prepare and begin at bprm->p, immediately followed by the
+ * envp strings, so that is the fallback source (terminated after the
+ * argc-th string so envp cannot leak into argv). argc is NOT counted
+ * in-kernel: userspace recovers argc exactly from the parsed argv it
+ * already builds (argc field in the payload is left 0). argc_out is
+ * kept only so the payload layout/call site stay stable.
  * __noinline: keeps its copy loop out of the exec programs' inline body. */
-static __noinline void read_argv(struct task_struct *task, char *dst, __u32 *argc_out)
+static __noinline void read_argv(struct task_struct *task, struct linux_binprm *bprm, char *dst, __u32 *argc_out)
 {
 	struct mm_struct *mm;
-	unsigned long start, end, len;
+	unsigned long start = 0, end = 0, len;
+	__u32 want_argc = 0;
+	int i;
 
 	*argc_out = 0;
 	mm = BPF_CORE_READ(task, mm);
-	if (!mm)
-		return;
-	start = BPF_CORE_READ(mm, arg_start);
-	end = BPF_CORE_READ(mm, arg_end);
-	if (!start || end <= start)
-		return;
+	if (mm) {
+		start = BPF_CORE_READ(mm, arg_start);
+		end = BPF_CORE_READ(mm, arg_end);
+	}
+	if (!start || end <= start) {
+		if (!bprm)
+			return;
+		start = BPF_CORE_READ(bprm, p);
+		if (!start)
+			return;
+		want_argc = (__u32)BPF_CORE_READ(bprm, argc);
+		end = start + MAX_ARGV_LEN; /* bounded by the len cap below */
+	}
 	len = end - start;
 	if (len > MAX_ARGV_LEN - 2)
 		len = MAX_ARGV_LEN - 2;
-	bpf_probe_read_user(dst, (__u32)len, (const void *)(unsigned long)start);
+	if (bpf_probe_read_user(dst, (__u32)len, (const void *)(unsigned long)start) < 0)
+		return;
+	if (!want_argc)
+		return;
+	/* Terminate after the argv strings: without this the envp strings
+	 * that follow them on the stack would parse as extra argv. */
+	{
+		__u32 seen = 0;
+
+		for (i = 0; i < MAX_ARGV_LEN - 1; i++) {
+			if (dst[i] != '\0')
+				continue;
+			seen++;
+			if (seen >= want_argc) {
+				dst[i + 1] = '\0';
+				break;
+			}
+		}
+	}
 }
 
 #endif /* AGENTLOUPE_SCOPE_H */

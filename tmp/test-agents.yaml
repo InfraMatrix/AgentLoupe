@@ -1,8 +1,0 @@
-agents:
-  # Diagnostic: match python3 as a plain binary (CONFIRMED session in
-  # kernel, no provisional/interpreter step) to isolate whether the
-  # exec pipeline and (dev, inode) keys work at all.
-  - name: pybin
-    kind: tool
-    match:
-      exec_path: /usr/bin/python3
