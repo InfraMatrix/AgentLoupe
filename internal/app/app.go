@@ -25,6 +25,7 @@ type Options struct {
 	EnableSyscallSummary bool
 	EnableFileMutations  bool
 	StatsInterval        time.Duration
+	SyscallInterval      time.Duration
 	DropPathPrefixes     []string
 	AttachPIDs           []int
 	AttachComms          []string
@@ -350,6 +351,16 @@ func Run(ctx context.Context, o Options) error {
 	proc := NewProcessor(loader, wallBase, writeJSON)
 	proc.DropPrefixes = o.DropPathPrefixes
 
+	// syscall_summary JSONL emission (userspace-synthesised; no kernel
+	// change). Final flush runs from the session_end hook in the
+	// Processor and, for sessions still live, on shutdown below.
+	var summarizer *SyscallSummarizer
+	if o.EnableSyscallSummary {
+		summarizer = newLoaderSyscallSummarizer(loader, proc, writeJSON)
+		proc.BeforeSessionEnd = summarizer.FlushSession
+		proc.ForgetHook = summarizer.ForgetSession
+	}
+
 	// Config watching: inotify on the config directory and each watched
 	// binary's parent directory (package managers rename over the path).
 	reloadDirs := func() []string {
@@ -389,7 +400,7 @@ func Run(ctx context.Context, o Options) error {
 
 	maintCtx, stopMaint := context.WithCancel(ctx)
 	defer stopMaint()
-	go maintenance(maintCtx, loader, proc, o, logf)
+	go maintenance(maintCtx, loader, proc, o, logf, summarizer)
 
 	logf("running (dev mode: detach on exit, nothing pinned)%s", maxRuntimeNote(ctx))
 	decodeErrs := 0
@@ -397,6 +408,9 @@ func Run(ctx context.Context, o Options) error {
 		rec, err := rd.Read()
 		if err != nil {
 			if errors.Is(err, ringbuf.ErrClosed) || ctx.Err() != nil {
+				if summarizer != nil {
+					summarizer.EmitAll() // final flush: deltas add up to kernel totals
+				}
 				logf("shutting down: closing links and collection (all programs detach)")
 				return nil
 			}

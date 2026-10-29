@@ -56,7 +56,7 @@
 #ifndef AGENTLOUPE_H
 #define AGENTLOUPE_H
 
-#define AGENTLOUPE_ABI_VERSION 2
+#define AGENTLOUPE_ABI_VERSION 3
 
 /* Minimum kernel for full (LSM) mode; the loader enforces this, the
  * header only documents it. Fallback floor is 5.8. */
@@ -70,7 +70,7 @@
 #define MAX_CANDIDATES       256    /* interpreter binaries (node, ...)   */
 #define MAX_AGENT_CGROUPS    2048   /* resolved cgroup IDs (v2 only)      */
 #define MAX_FILE_INFOS       16384  /* struct file * -> fd_info (LRU)     */
-#define MAX_SYSCALL_COUNTS   16384  /* (session, nr) counters (LRU)       */
+#define MAX_SYSCALL_COUNTS   65536  /* (session, tgid, nr) counters (LRU): ~64 sessions x 32 procs x 32 nrs */
 #define RINGBUF_BYTES        (8 * 1024 * 1024)
 
 /* ---- Fixed string sizes (truncation is flagged, never silent) ---------- */
@@ -246,12 +246,14 @@ struct fd_info {
 	__u8  _pad[3];
 };                                        /* 568 bytes                         */
 
-/* Syscall summary (optional probe): counts only, never events. */
+/* Syscall summary (optional probe): counts only, never events. The tgid
+ * is in the key (ABI v3) so counts attribute to the process that made
+ * them, not just the session. */
 struct syscall_key {
 	__u64 session_id;
+	__u32 tgid;
 	__u32 syscall_nr;
-	__u32 _pad;
-};
+};                                        /* 16 bytes */
 
 /* Per-CPU scratch for the dentry walk: component staging cannot fit on the
  * 512-byte BPF stack alongside a 256-byte path buffer. Single entry per
@@ -470,6 +472,7 @@ _Static_assert(sizeof(struct ev_file_close) == 552, "ev_file_close ABI changed")
 _Static_assert(sizeof(struct session_info) == 88, "session_info ABI changed");
 _Static_assert(sizeof(struct tracked_session) == 8, "tracked_session ABI changed");
 _Static_assert(sizeof(struct fd_info) == 568, "fd_info ABI changed");
+_Static_assert(sizeof(struct syscall_key) == 16, "syscall_key ABI changed");
 
 /* ---- Maps ----------------------------------------------------------------
  * All maps are defined here (not per-program) so every program sees
@@ -543,7 +546,9 @@ struct {
 	__type(value, struct fd_info);
 } file_infos SEC(".maps");
 
-/* Optional per-(session, syscall) counts. */
+/* Optional per-(session, tgid, syscall) counts. LRU: eviction under
+ * pressure loses the least-recently-used counter (a failed insert still
+ * bumps syscall_updates_failed in agentloupe_counters). */
 struct {
 	__uint(type, BPF_MAP_TYPE_LRU_HASH);
 	__uint(max_entries, MAX_SYSCALL_COUNTS);

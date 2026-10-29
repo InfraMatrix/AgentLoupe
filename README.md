@@ -82,8 +82,9 @@ Opt-in probes (off by default):
 ```sh
 --enable-file-mutations    # unlink / rename / chmod events
 --enable-io-accounting     # vfs_* byte counts + file_close (make bench-io first)
---enable-syscall-summary   # per-(session, syscall) counts, dumped by name
-                           # in the stats log (top 25 per session)
+--enable-syscall-summary   # per-(session, process, syscall) counts, dumped by name
+                           # in the stats log (top 25 per session) and, with
+                           # --syscall-interval, as syscall_summary JSONL events
 ```
 
 ### Attaching to already-running agents
@@ -110,12 +111,83 @@ go build -o loupe-scorecard ./cmd/loupe-scorecard
 ./loupe-scorecard --json capture.jsonl   # machine-readable
 ```
 
+Per-agent timeline and breakdown (process swimlanes, file/network
+markers, syscall rate over time):
+
+```sh
+go build -o loupe-timeline ./cmd/loupe-timeline
+./loupe-timeline capture.jsonl                    # plain-text summary per session
+./loupe-timeline --json capture.jsonl             # same breakdown as JSON
+./loupe-timeline --html timeline.html capture.jsonl  # one self-contained
+                                                  # HTML file (inline CSS/JS,
+                                                  # no CDN, works offline):
+                                                  # filter by agent/session,
+                                                  # zoom/pan, hover details
+```
+
+In the HTML view the syscall rate chart is stacked **by category** by
+default (process / file / network / memory / sync-wait / signals / time /
+other — one name-based mapping in `cmd/loupe-timeline/categories.go`,
+applied to both amd64 and arm64 syscall names). Memory and sync/wait are
+hidden by default (they are mostly runtime background) with a toggle to
+show them, and a drill-down selector re-stacks the chart by the
+individual syscalls inside one category. Purple ◆ markers on the
+swimlanes mark the first interval in which a session used a syscall it
+had never used before. Per-session tables show the category breakdown
+with per-syscall drill-down, an always-shown **notable syscalls** list
+(execve, connect, bind, listen, accept, unlink/rename/chmod/chown
+families, ptrace, setuid/setgid/capset, mount/umount, bpf, kill/tgkill,
+module loading — each with first-seen time and count), and **per-program
+attribution**: syscalls rolled up to the program that made them (e.g.
+"python3 made 90% of the file syscalls"), by mapping each TGID to the
+program it exec'd. The text and `--json` outputs carry the same
+breakdowns.
+
+`loupe-timeline` streams the capture (it never loads it whole) and
+aggregates in Go, so multi-hundred-MB captures stay usable; markers per
+lane and the syscall time series are downsampled/bucketed for the HTML
+and the page says so when that happens. Captures without
+`syscall_summary` events (older captures, or runs without
+`--enable-syscall-summary`) still render everything else, with a note
+that syscall rates are unavailable.
+
+#### `syscall_summary` events
+
+With `--enable-syscall-summary`, the loader also synthesises
+`syscall_summary` events into the JSONL stream. The kernel counts per
+(session, TGID, syscall number) — ABI v3 — and userspace turns snapshots
+of that map into delta events. One event is emitted every `--syscall-interval`
+(default `1s`; `0` disables the periodic emission), plus a final flush
+for a session just before its `session_end` and for all live sessions
+on shutdown, so per-session deltas sum exactly to the kernel's
+cumulative totals. Sessions/intervals with zero activity are skipped.
+The existing stderr syscall dump (on `--stats-interval`) is unchanged.
+
+| Field | Meaning |
+|---|---|
+| `ts` | RFC3339Nano wall-clock timestamp of the emission. |
+| `type` | `"syscall_summary"`. |
+| `session_id` | Session the counts belong to. |
+| `parent_session_id` | Parent session ID (`0` if none/unknown). |
+| `agent_name` | Agent rule name for the session. |
+| `pid`, `pid_in_ns`, `ppid`, `uid` | Unused for this synthesised event; always `0`. |
+| `comm` | Unused; always `""`. |
+| `interval_ms` | Milliseconds since the previous `syscall_summary` emission pass (the configured `--syscall-interval` in steady state). |
+| `counts` | Object mapping syscall name → count for this interval only (**deltas**, not cumulative). Names come from the amd64/arm64 syscall tables; unknown numbers are `"sys_<nr>"`. |
+| `per_process_counts` | Object mapping TGID (decimal string) → syscall name → count, same interval and delta semantics as `counts`. Summing it over TGIDs gives `counts`; it attributes syscalls to the process (and, via exec events, the program) that made them. |
+
+Example:
+
+```json
+{"ts":"2026-10-29T18:31:26.381185284Z","type":"syscall_summary","session_id":690100720757637100,"parent_session_id":0,"agent_name":"claude-code","pid":0,"pid_in_ns":0,"ppid":0,"uid":0,"comm":"","interval_ms":1000,"counts":{"read":812,"write":97,"openat":45}}
+```
+
 Useful loader flags: `--drop-path-prefix /proc/` (repeatable) suppresses
 file-event noise (e.g. agents polling their own `/proc/<pid>/stat`);
 `session_end` events carry `cpu_user_ms`/`cpu_sys_ms` (session root
 process CPU, sampled from `/proc`). Network events cover TCP and UDP;
 connects to port 53 are flagged `"dns": true` (no payload parsing).
-Paths/argv are captured up to 512 bytes (ABI v2); `comm` remains capped
+Paths/argv are captured up to 512 bytes (ABI v3); `comm` remains capped
 at 16 chars by the kernel (`TASK_COMM_LEN`) — use exec `filename`/`argv`
 to disambiguate.
 
@@ -140,7 +212,10 @@ Three layers, deliberately kept separate:
   candidate and confirmed from argv, a child exec, a file open, and
   TCP and UDP connects to local listeners, with the syscall-summary
   probe enabled. It asserts the expected events with
-  correct PID/comm/path/address, zero ring-buffer drops and zero
+  correct PID/comm/path/address, that `syscall_summary` JSONL events
+  appear (with a final flush before `session_end`) and their deltas —
+  session-level and per-process (`per_process_counts`) — sum
+  exactly to the kernel `syscall_counts` totals, zero ring-buffer drops and zero
   map-full/lost counters, and that no BPF programs, maps, links, or
   pinned objects remain after shutdown. Root-only: the test skips
   unless run as root and never runs in CI. Run `make build` as your
@@ -189,6 +264,8 @@ and file paths still use `bpf_d_path` (`"path_src": "d_path"`).
 ```
 bpf/            eBPF C (single TU) + shared ABI header
 cmd/agentloupe/ loader entrypoint (flags, signals, --max-runtime)
+cmd/loupe-scorecard/ per-session totals from a capture
+cmd/loupe-timeline/  per-session timeline + breakdown (text / JSON / HTML)
 internal/app/   loader: feature probe, attach, maps, events, housekeeping
 internal/config/ agents.yaml parsing
 configs/        example configuration

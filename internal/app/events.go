@@ -1,6 +1,7 @@
 package app
 
 import (
+	"bytes"
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
@@ -81,8 +82,8 @@ func Decode(raw []byte) (*Decoded, error) {
 	}
 	size := int(binary.LittleEndian.Uint16(raw[2:4]))
 	version := binary.LittleEndian.Uint16(raw[4:6])
-	if version != 2 {
-		return nil, fmt.Errorf("abi version %d, want 2", version)
+	if version != 3 {
+		return nil, fmt.Errorf("abi version %d, want 3", version)
 	}
 	if size < 72 || size > len(raw) {
 		return nil, fmt.Errorf("bad record size %d (have %d)", size, len(raw))
@@ -225,7 +226,13 @@ func (o Output) MarshalJSON() ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := json.Unmarshal(base, &m); err != nil {
+	// UseNumber: session_id is (run_id<<32)|counter and exceeds 2^53, so
+	// decoding into float64 would silently round it and the JSONL session
+	// IDs would no longer match the kernel's (or each other's exact value
+	// when compared against map keys).
+	dec := json.NewDecoder(bytes.NewReader(base))
+	dec.UseNumber()
+	if err := dec.Decode(&m); err != nil {
 		return nil, err
 	}
 	for k, v := range o.Fields {
@@ -254,16 +261,27 @@ type pendingSession struct {
 // reject or timeout the buffer is discarded and the kernel session is
 // tombstoned REJECTED via the SessionControl.
 type Processor struct {
-	mu              sync.Mutex
-	ctrl            SessionControl
-	write           func(Output) error
-	wallBase        time.Time // wall clock corresponding to monotonic 0
-	pending         map[uint64]*pendingSession
-	decided         map[uint64]bool // session -> confirmed(true)/rejected(false)
-	started         map[uint64]bool
+	mu       sync.Mutex
+	ctrl     SessionControl
+	write    func(Output) error
+	wallBase time.Time // wall clock corresponding to monotonic 0
+	pending  map[uint64]*pendingSession
+	decided  map[uint64]bool // session -> confirmed(true)/rejected(false)
+	started  map[uint64]bool
+	// startedMu guards only `started`, separately from mu: the syscall
+	// summarizer checks HasStarted while holding its own lock and runs
+	// under mu via BeforeSessionEnd, so HasStarted must not take mu.
+	startedMu       sync.RWMutex
 	droppedBuf      int
 	DropPrefixes    []string // file paths with any of these prefixes are dropped
 	droppedFiltered int
+	// BeforeSessionEnd, if set, runs (synchronously, before the
+	// session_end line is written) when a session's root exits. Used to
+	// flush a final syscall_summary for the session. The hook must write
+	// via the same writer directly; it runs under p.mu.
+	BeforeSessionEnd func(sid uint64)
+	// ForgetHook, if set, runs when Forget drops local session state.
+	ForgetHook func(sid uint64)
 }
 
 // DroppedFiltered reports how many events --drop-path-prefix suppressed.
@@ -315,6 +333,33 @@ func (p *Processor) wallClock(tsNS uint64) string {
 	return p.wallBase.Add(time.Duration(tsNS)).UTC().Format(time.RFC3339Nano)
 }
 
+// WallClockNow returns the wall clock corresponding to the current
+// monotonic time, in the same clock domain as event `ts` fields.
+func (p *Processor) WallClockNow() string {
+	return p.wallClock(monotonicNS())
+}
+
+// HasStarted reports whether a session_start has been emitted for sid.
+func (p *Processor) HasStarted(sid uint64) bool {
+	p.startedMu.RLock()
+	defer p.startedMu.RUnlock()
+	return p.started[sid]
+}
+
+func (p *Processor) markStarted(sid uint64) bool {
+	p.startedMu.Lock()
+	defer p.startedMu.Unlock()
+	was := p.started[sid]
+	p.started[sid] = true
+	return was
+}
+
+func (p *Processor) markEnded(sid uint64) {
+	p.startedMu.Lock()
+	defer p.startedMu.Unlock()
+	delete(p.started, sid)
+}
+
 func (p *Processor) toOutput(d *Decoded, provisional bool) Output {
 	out := Output{
 		Ts: p.wallClock(d.TsNS), Type: typeNames[d.Type],
@@ -332,8 +377,7 @@ func (p *Processor) toOutput(d *Decoded, provisional bool) Output {
 }
 
 func (p *Processor) emitLocked(d *Decoded, provisional bool) {
-	if !p.started[d.SessionID] {
-		p.started[d.SessionID] = true
+	if !p.markStarted(d.SessionID) {
 		start := p.toOutput(d, provisional)
 		start.Type = "session_start"
 		start.Fields = map[string]any{}
@@ -342,6 +386,9 @@ func (p *Processor) emitLocked(d *Decoded, provisional bool) {
 	_ = p.write(p.toOutput(d, provisional))
 	if d.Type == 3 { // exit
 		if meta, ok := p.ctrl.LookupMeta(d.SessionID); ok && meta.RootTGID == d.Tgid {
+			if p.BeforeSessionEnd != nil {
+				p.BeforeSessionEnd(d.SessionID)
+			}
 			end := p.toOutput(d, false)
 			end.Type = "session_end"
 			end.Fields = map[string]any{}
@@ -354,7 +401,7 @@ func (p *Processor) emitLocked(d *Decoded, provisional bool) {
 				}
 			}
 			_ = p.write(end)
-			delete(p.started, d.SessionID)
+			p.markEnded(d.SessionID)
 		}
 	}
 }
@@ -468,5 +515,8 @@ func (p *Processor) Forget(sid uint64) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	delete(p.pending, sid)
-	delete(p.started, sid)
+	p.markEnded(sid)
+	if p.ForgetHook != nil {
+		p.ForgetHook(sid)
+	}
 }

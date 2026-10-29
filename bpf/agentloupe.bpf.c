@@ -1066,6 +1066,7 @@ int handle_sys_enter_count(struct sys_enter_raw_args *ctx)
 	if (!in_scope(cur_tgid(), &sid, &info))
 		return 0;
 	key.session_id = sid;
+	key.tgid = cur_tgid();
 	key.syscall_nr = (__u32)ctx->args[1];
 	count = bpf_map_lookup_elem(&syscall_counts, &key);
 	if (count) {

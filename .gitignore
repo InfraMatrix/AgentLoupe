@@ -4,6 +4,7 @@
 # Built binaries (make build / go build -o)
 /agentloupe
 /loupe-scorecard
+/loupe-timeline
 
 # Compiled BPF objects, generated next to their sources by `make bpf`
 /bpf/*.o

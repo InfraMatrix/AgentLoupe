@@ -13,6 +13,7 @@ package app
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -28,19 +29,22 @@ import (
 )
 
 type capturedEvent struct {
-	Raw       string
-	Type      string  `json:"type"`
-	SessionID uint64  `json:"session_id"`
-	AgentName string  `json:"agent_name"`
-	PID       uint32  `json:"pid"`
-	Comm      string  `json:"comm"`
-	Filename  string  `json:"filename"`
-	Path      string  `json:"path"`
-	Daddr     string  `json:"daddr"`
-	Dport     uint16  `json:"dport"`
-	Protocol  uint8   `json:"protocol"`
-	DNS       bool    `json:"dns"`
-	Duration  *uint64 `json:"duration_ms"`
+	Raw        string
+	Type       string                       `json:"type"`
+	SessionID  uint64                       `json:"session_id"`
+	AgentName  string                       `json:"agent_name"`
+	PID        uint32                       `json:"pid"`
+	Comm       string                       `json:"comm"`
+	Filename   string                       `json:"filename"`
+	Path       string                       `json:"path"`
+	Daddr      string                       `json:"daddr"`
+	Dport      uint16                       `json:"dport"`
+	Protocol   uint8                        `json:"protocol"`
+	DNS        bool                         `json:"dns"`
+	Duration   *uint64                      `json:"duration_ms"`
+	Counts     map[string]uint64            `json:"counts"`
+	PerProcess map[string]map[string]uint64 `json:"per_process_counts"`
+	IntervalMS *int64                       `json:"interval_ms"`
 }
 
 func readEvents(path string) []capturedEvent {
@@ -276,6 +280,7 @@ func TestIntegrationLoaderObserveOnly(t *testing.T) {
 			Output:               outFile,
 			StatsInterval:        0,
 			EnableSyscallSummary: true,
+			SyscallInterval:      100 * time.Millisecond,
 		})
 		close(loaderDone)
 	}()
@@ -525,7 +530,11 @@ FOUND:
 	}
 
 	// Syscall summary (--enable-syscall-summary) must have counted
-	// something for the workload session.
+	// something for the workload session. Record the kernel's cumulative
+	// totals for that session now (the workload has finished, so they
+	// can no longer change) to compare against the JSONL deltas below.
+	kernelSyscallTotals := map[string]uint64{}
+	kernelPerProcess := map[string]map[string]uint64{}
 	if scMap, err := newMapByName("syscall_counts", baseMaps); err == nil {
 		it := scMap.Iterate()
 		var k [16]byte
@@ -533,10 +542,25 @@ FOUND:
 		n := 0
 		for it.Next(&k, &v) {
 			n++
+			// struct syscall_key (ABI v3): sid [0:8], tgid [8:12], nr [12:16].
+			if binary.LittleEndian.Uint64(k[0:8]) == pyExec.SessionID {
+				name := syscallSummaryName(binary.LittleEndian.Uint32(k[12:16]))
+				kernelSyscallTotals[name] += v
+				pid := fmt.Sprintf("%d", binary.LittleEndian.Uint32(k[8:12]))
+				pp, ok := kernelPerProcess[pid]
+				if !ok {
+					pp = map[string]uint64{}
+					kernelPerProcess[pid] = pp
+				}
+				pp[name] += v
+			}
 		}
 		scMap.Close()
 		if n == 0 {
 			fail("syscall_counts map empty despite --enable-syscall-summary")
+		}
+		if len(kernelSyscallTotals) == 0 {
+			fail("syscall_counts has no entries for workload session %d", pyExec.SessionID)
 		}
 	}
 
@@ -551,6 +575,83 @@ FOUND:
 		fail("loader did not stop within 15s of cancel")
 	}
 	// The deferred cancel/drain above is now a no-op (loader already done).
+
+	// syscall_summary JSONL: at least one event for the workload session,
+	// a final one before its session_end, and deltas that add up exactly
+	// to the kernel's cumulative totals recorded above.
+	{
+		final := readEvents(outFile)
+		jsonTotals := map[string]uint64{}
+		jsonPerProcess := map[string]map[string]uint64{}
+		summaries := 0
+		lastSummaryIdx, sessionEndIdx := -1, -1
+		for i, ev := range final {
+			if ev.SessionID != pyExec.SessionID {
+				continue
+			}
+			switch ev.Type {
+			case "syscall_summary":
+				summaries++
+				lastSummaryIdx = i
+				if ev.AgentName != agentName {
+					fail("syscall_summary agent_name = %q, want %q", ev.AgentName, agentName)
+				}
+				if ev.IntervalMS == nil {
+					fail("syscall_summary missing interval_ms: %s", ev.Raw)
+				}
+				if len(ev.Counts) == 0 {
+					fail("syscall_summary with empty counts: %s", ev.Raw)
+				}
+				for name, c := range ev.Counts {
+					jsonTotals[name] += c
+				}
+				if len(ev.PerProcess) == 0 {
+					fail("syscall_summary missing per_process_counts: %s", ev.Raw)
+				}
+				for pid, pc := range ev.PerProcess {
+					pp, ok := jsonPerProcess[pid]
+					if !ok {
+						pp = map[string]uint64{}
+						jsonPerProcess[pid] = pp
+					}
+					for name, c := range pc {
+						pp[name] += c
+					}
+				}
+			case "session_end":
+				sessionEndIdx = i
+			}
+		}
+		if summaries == 0 {
+			fail("no syscall_summary events in JSONL for workload session %d\ncaptured event stream (%d events):\n%s", pyExec.SessionID, len(final), dumpEvents(final))
+		}
+		if sessionEndIdx >= 0 && (lastSummaryIdx < 0 || lastSummaryIdx > sessionEndIdx) {
+			fail("last syscall_summary (line %d) is not before session_end (line %d)", lastSummaryIdx, sessionEndIdx)
+		}
+		if len(jsonTotals) != len(kernelSyscallTotals) {
+			fail("syscall_summary totals %v != kernel totals %v", jsonTotals, kernelSyscallTotals)
+		}
+		for name, kv := range kernelSyscallTotals {
+			if jsonTotals[name] != kv {
+				fail("syscall_summary delta sum for %s = %d, want kernel total %d (all: json=%v kernel=%v)", name, jsonTotals[name], kv, jsonTotals, kernelSyscallTotals)
+			}
+		}
+		// Per-process attribution must add up to the same kernel totals,
+		// split by TGID.
+		if len(jsonPerProcess) != len(kernelPerProcess) {
+			fail("per_process_counts pids %v != kernel (sid,tgid,nr) pids %v", jsonPerProcess, kernelPerProcess)
+		}
+		for pid, pc := range kernelPerProcess {
+			for name, kv := range pc {
+				if jsonPerProcess[pid][name] != kv {
+					fail("per_process_counts[%s][%s] = %d, want kernel total %d (json=%v kernel=%v)", pid, name, jsonPerProcess[pid][name], kv, jsonPerProcess, kernelPerProcess)
+				}
+			}
+		}
+		if _, ok := kernelPerProcess[fmt.Sprintf("%d", lastWorkload.pyPID)]; !ok {
+			fail("kernel syscall_counts has no entries for workload pid %d (per-process attribution broken): %v", lastWorkload.pyPID, kernelPerProcess)
+		}
+	}
 
 	leakDeadline := time.Now().Add(5 * time.Second)
 	for {

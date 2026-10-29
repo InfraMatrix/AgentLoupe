@@ -1,7 +1,6 @@
 package app
 
 import (
-	"encoding/binary"
 	"fmt"
 	"sort"
 )
@@ -18,22 +17,31 @@ func SyscallName(nr uint32) string {
 // dumpSyscallCounts surfaces the kernel syscall_counts map (populated
 // only with --enable-syscall-summary) in the periodic stats log.
 func dumpSyscallCounts(l *Loader, logf func(string, ...any)) {
-	m := l.coll.Maps["syscall_counts"]
-	if m == nil {
+	if l == nil || l.coll == nil || l.coll.Maps["syscall_counts"] == nil {
+		return
+	}
+	snap, err := snapshotSyscallCounts(l)
+	if err != nil {
 		return
 	}
 	type cnt struct {
 		nr    uint32
 		count uint64
 	}
+	bySessionNR := map[uint64]map[uint32]uint64{}
+	for k, v := range snap {
+		m, ok := bySessionNR[k.sid]
+		if !ok {
+			m = map[uint32]uint64{}
+			bySessionNR[k.sid] = m
+		}
+		m[k.nr] += v // sum across TGIDs: the stderr dump stays per-session
+	}
 	bySession := map[uint64][]cnt{}
-	it := m.Iterate()
-	var key [16]byte
-	var val uint64
-	for it.Next(&key, &val) {
-		sid := binary.LittleEndian.Uint64(key[0:8])
-		nr := binary.LittleEndian.Uint32(key[8:12])
-		bySession[sid] = append(bySession[sid], cnt{nr, val})
+	for sid, m := range bySessionNR {
+		for nr, v := range m {
+			bySession[sid] = append(bySession[sid], cnt{nr, v})
+		}
 	}
 	sids := make([]uint64, 0, len(bySession))
 	for sid := range bySession {

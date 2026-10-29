@@ -40,10 +40,15 @@ func possibleCPUs() int {
 	return n
 }
 
-func maintenance(ctx context.Context, l *Loader, proc *Processor, o Options, logf func(string, ...any)) {
-	ticker := time.NewTicker(time.Second)
+func maintenance(ctx context.Context, l *Loader, proc *Processor, o Options, logf func(string, ...any), summarizer *SyscallSummarizer) {
+	tick := time.Second
+	if summarizer != nil && o.SyscallInterval > 0 && o.SyscallInterval < tick {
+		tick = o.SyscallInterval
+	}
+	ticker := time.NewTicker(tick)
 	defer ticker.Stop()
 	var lastStats, lastSweep, lastFlush, lastAdopt time.Time
+	lastSyscall := time.Now()
 	for {
 		select {
 		case <-ctx.Done():
@@ -68,6 +73,10 @@ func maintenance(ctx context.Context, l *Loader, proc *Processor, o Options, log
 				lastStats = now
 				printStats(l, logf)
 				dumpSyscallCounts(l, logf)
+			}
+			if summarizer != nil && o.SyscallInterval > 0 && now.Sub(lastSyscall) >= o.SyscallInterval {
+				lastSyscall = now
+				summarizer.EmitAll()
 			}
 			if now.Sub(lastSweep) >= 30*time.Second {
 				lastSweep = now
