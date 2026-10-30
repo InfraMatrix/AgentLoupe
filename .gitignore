@@ -13,6 +13,10 @@
 # Local run output: JSONL event streams, loader logs, scratch configs.
 /tmp/
 /*.jsonl
+/demo-loader.log
+/demo-timeline.txt
+/timeline-demo.html
+/timeline-live.html
 
 # Go test / coverage artifacts produced at the repo root
 /coverage.out

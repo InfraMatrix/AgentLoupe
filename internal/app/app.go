@@ -29,13 +29,17 @@ type Options struct {
 	// OrphanTimeout bounds how long a session stays open after its
 	// root exits while tracked processes remain (0 = wait
 	// indefinitely). See Processor.OrphanTimeout.
-	OrphanTimeout    time.Duration
-	DropPathPrefixes []string
-	AttachPIDs       []int
-	AttachComms      []string
-	AttachExes       []string
-	UseCatalog       bool
-	CatalogOnly      []string
+	OrphanTimeout time.Duration
+	// ForceTracepointMode selects the tracepoint-fallback probe set
+	// even when BPF LSM is available, so the fallback path can be
+	// rehearsed and tested on any host.
+	ForceTracepointMode bool
+	DropPathPrefixes    []string
+	AttachPIDs          []int
+	AttachComms         []string
+	AttachExes          []string
+	UseCatalog          bool
+	CatalogOnly         []string
 }
 
 type progReq struct {
@@ -185,7 +189,7 @@ func loadCollection(object string, reqs []progReq, logf func(string, ...any)) (*
 	return nil, nil, "", fmt.Errorf("could not load BPF collection with any program set")
 }
 
-func featureProbe(logf func(string, ...any)) (lsmMode bool) {
+func featureProbe(logf func(string, ...any), forceTracepoint bool) (lsmMode bool) {
 	rel, _ := os.ReadFile("/proc/sys/kernel/osrelease")
 	lsmList := ""
 	if data, err := os.ReadFile("/sys/kernel/security/lsm"); err == nil {
@@ -215,6 +219,10 @@ func featureProbe(logf func(string, ...any)) (lsmMode bool) {
 	if !cgroupV2Available() {
 		logf("feature probe: WARNING cgroup v2 not found — service (cgroup/k8s) matching disabled in practice")
 	}
+	if forceTracepoint {
+		logf("feature probe: tracepoint fallback mode forced (--force-tracepoint-mode) — LSM hooks will not be attached")
+		return false
+	}
 	if !lsmActive {
 		logf("feature probe: BPF LSM inactive → tracepoint fallback mode (paths via dentry walk / raw args, io_uring syscall blind spots apply)")
 		return false
@@ -230,7 +238,7 @@ func Run(ctx context.Context, o Options) error {
 	logf := func(format string, args ...any) {
 		fmt.Fprintf(os.Stderr, "agentloupe: "+format+"\n", args...)
 	}
-	lsmMode := featureProbe(logf)
+	lsmMode := featureProbe(logf, o.ForceTracepointMode)
 
 	cfg, existed, err := config.Load(o.ConfigPath)
 	if err != nil {

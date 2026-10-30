@@ -427,23 +427,29 @@ static __always_inline __u8 path_via_dpath(struct path *p, char *out, bool *part
 }
 
 /*
- * Bounded dentry walk into out[MAX_PATH_LEN]. Components are staged
- * backwards in per-CPU scratch, then copied out. Returns PATH_SRC_DENTRY_WALK
+ * Bounded dentry walk into out[MAX_PATH_LEN]. Returns PATH_SRC_DENTRY_WALK
  * (or PATH_SRC_NONE when there is nothing to walk); *partial is set on
  * depth/name/length overflow. Mount roots terminate the walk (see header).
  *
- * Deliberately __noinline with plain bounded loops: inlining this twice
- * into the exec program (filename + cwd) with unrolled loops blew the
- * verifier's 1M processed-instruction limit. As a subprogram it is
- * verified once; masked indices keep every access provably in range
- * inside loop bodies.
+ * Verifier-shape notes (this function decides whether the fallback
+ * programs load at all): no byte loops anywhere. Phase 1 climbs
+ * dentries and stages each component into a zero-padded fixed slot in
+ * per-CPU scratch via bpf_probe_read_kernel_str — the copy happens
+ * inside the helper. Phase 2 emits the path with one bounded loop
+ * over components (≤16), each copied by a constant-size 64-byte
+ * memcpy, which compiles to straight-line code. Both earlier shapes
+ * — backwards staging with per-byte copies, and a flat 511-iteration
+ * output loop — exceeded the verifier's 1M processed-instruction
+ * limit in handle_exec_tp, which calls this twice (filename + cwd).
+ * __noinline so the body is verified once per program, not per call.
  */
 static __noinline __u8 path_via_walk(struct dentry *dentry, char *out, bool *partial)
 {
 	struct path_scratch *s;
 	struct dentry *cur = dentry;
+	__u32 lens[DENTRY_WALK_MAX_DEPTH];
 	__u32 zero = 0;
-	int pos = MAX_PATH_LEN;
+	int ncomp = 0;
 	int i;
 
 	out[0] = '\0';
@@ -452,16 +458,13 @@ static __noinline __u8 path_via_walk(struct dentry *dentry, char *out, bool *par
 	s = bpf_map_lookup_elem(&path_scratch_map, &zero);
 	if (!s)
 		return PATH_SRC_NONE;
-	__builtin_memset(s->buf, 0, sizeof(s->buf));
 
+	/* Phase 1: climb to the filesystem root, staging components. */
 	for (i = 0; i < DENTRY_WALK_MAX_DEPTH; i++) {
 		struct dentry *parent;
 		const unsigned char *name;
 		long len, n;
-		int j, start;
 
-		if (!cur)
-			break;
 		parent = BPF_CORE_READ(cur, d_parent);
 		if (!parent || parent == cur)
 			break; /* filesystem root */
@@ -473,50 +476,63 @@ static __noinline __u8 path_via_walk(struct dentry *dentry, char *out, bool *par
 			*partial = true;
 			len = DENTRY_WALK_MAX_NAME - 1;
 		}
-		n = bpf_probe_read_kernel_str(s->comp, DENTRY_WALK_MAX_NAME, name);
+		/* Zero-pad the slot first: phase 2 copies a constant 64
+		 * bytes per component and relies on the bytes after the
+		 * component's NUL being zero. */
+		__builtin_memset(&s->names[i * DENTRY_WALK_MAX_NAME], 0,
+				 DENTRY_WALK_MAX_NAME);
+		n = bpf_probe_read_kernel_str(
+			&s->names[i * DENTRY_WALK_MAX_NAME],
+			DENTRY_WALK_MAX_NAME, name);
 		if (n <= 0)
 			break;
 		if (n - 1 < len)
 			len = n - 1;
-		if (pos < (int)len + 1) {
-			*partial = true;
-			break;
-		}
-		pos -= (int)len;
-		start = pos;
-		for (j = 0; j < DENTRY_WALK_MAX_NAME && j < len; j++)
-			s->buf[(start + j) & (MAX_PATH_LEN - 1)] =
-				s->comp[j & (DENTRY_WALK_MAX_NAME - 1)];
-		pos -= 1;
-		if (pos < 0) {
-			*partial = true;
-			pos = 0;
-			break;
-		}
-		s->buf[pos & (MAX_PATH_LEN - 1)] = '/';
+		lens[i] = (__u32)len;
+		ncomp++;
 		cur = parent;
 	}
 	if (i >= DENTRY_WALK_MAX_DEPTH && cur) {
 		struct dentry *parent = BPF_CORE_READ(cur, d_parent);
+
 		if (parent && parent != cur)
 			*partial = true; /* stopped by depth, not by root */
 	}
 
-	if (pos >= MAX_PATH_LEN) { /* nothing walked: root itself */
+	if (ncomp == 0) { /* nothing walked: root itself */
 		out[0] = '/';
 		out[1] = '\0';
 		return PATH_SRC_DENTRY_WALK;
 	}
-	for (i = 0; i < MAX_PATH_LEN; i++) {
-		int src = pos + i;
 
-		if (src >= MAX_PATH_LEN)
-			break;
-		out[i & (MAX_PATH_LEN - 1)] = s->buf[src & (MAX_PATH_LEN - 1)];
+	/* Phase 2: emit "/comp/.../basename". Slot ncomp-1 is the
+	 * root-most component; slot 0 is the basename. Each component is
+	 * copied with a constant-size 64-byte memcpy — straight-line
+	 * code, no byte loop (a flat 511-iteration output loop still
+	 * exceeded the processed-instruction limit: the verifier walks
+	 * every iteration). The slot's zero padding lands in `out` too;
+	 * the next component's '/' overwrites it. Output truncation
+	 * drops trailing components; *partial says so either way. */
+	{
+		int pos = 0;
+		int ci;
+
+		for (ci = ncomp - 1; ci >= 0; ci--) {
+			__u32 len = lens[ci & (DENTRY_WALK_MAX_DEPTH - 1)];
+
+			if (pos > MAX_PATH_LEN - 66) {
+				*partial = true; /* no room for '/' + component */
+				break;
+			}
+			out[pos & (MAX_PATH_LEN - 1)] = '/';
+			pos++;
+			__builtin_memcpy(&out[pos & (MAX_PATH_LEN - 1)],
+					 &s->names[ci * DENTRY_WALK_MAX_NAME],
+					 DENTRY_WALK_MAX_NAME);
+			pos += (int)len;
+		}
+		out[pos & (MAX_PATH_LEN - 1)] = '\0';
 	}
-	if (pos == 0)
-		*partial = true; /* leading components were dropped */
-	out[MAX_PATH_LEN - 1] = '\0';
 	return PATH_SRC_DENTRY_WALK;
 }
 
