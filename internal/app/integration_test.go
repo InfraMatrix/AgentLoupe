@@ -547,7 +547,7 @@ FOUND:
 		n := 0
 		for it.Next(&k, &v) {
 			n++
-			// struct syscall_key (ABI v3): sid [0:8], tgid [8:12], nr [12:16].
+			// struct syscall_key (tgid since ABI v3): sid [0:8], tgid [8:12], nr [12:16].
 			if binary.LittleEndian.Uint64(k[0:8]) == pyExec.SessionID {
 				name := syscallSummaryName(binary.LittleEndian.Uint32(k[12:16]))
 				kernelSyscallTotals[name] += v

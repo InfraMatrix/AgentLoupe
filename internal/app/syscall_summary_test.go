@@ -275,7 +275,7 @@ func TestProcessorFlushBeforeSessionEnd(t *testing.T) {
 		t.Fatal(err)
 	}
 	proc.Process(exec)
-	exit, err := Decode(buildRecord(3, 0, make([]byte, 8)))
+	exit, err := Decode(buildRecord(3, 0, make([]byte, 32))) // ev_exit (ABI v4)
 	if err != nil {
 		t.Fatal(err)
 	}

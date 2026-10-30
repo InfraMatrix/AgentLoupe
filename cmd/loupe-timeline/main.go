@@ -56,6 +56,9 @@ type rawEvent struct {
 	PerProcess   map[string]map[string]uint64 `json:"per_process_counts"`
 	IntervalMS   int64                        `json:"interval_ms"`
 	ExitCode     int32                        `json:"exit_code"`
+	CPUUserMS    uint64                       `json:"cpu_user_ms"`
+	CPUSysMS     uint64                       `json:"cpu_sys_ms"`
+	MaxRSSKB     uint64                       `json:"max_rss_kb"`
 	Reason       string                       `json:"reason"`
 	StillRunning []uint32                     `json:"still_running"`
 }
@@ -75,6 +78,13 @@ type Process struct {
 	DurationMs int64    `json:"duration_ms"`
 	OpenEnded  bool     `json:"open_ended"`
 	Depth      int      `json:"depth"`
+	// Per-process resource use from the exit event (ABI v4): the
+	// process's own thread-group CPU and peak RSS, not its children's.
+	// Zero/absent on captures predating ABI v4 and for processes that
+	// never exited within the capture.
+	CPUUserMS uint64 `json:"cpu_user_ms,omitempty"`
+	CPUSysMS  uint64 `json:"cpu_sys_ms,omitempty"`
+	MaxRSSKB  uint64 `json:"max_rss_kb,omitempty"`
 
 	startT, endT time.Time
 	parent       *Process
@@ -349,6 +359,18 @@ func (b *builder) add(ev *rawEvent) {
 		if hasTS && s.rootExitT.IsZero() {
 			s.rootExitT = ts
 		}
+		// root_exit mirrors the root exit's resource fields (ABI v4);
+		// apply them if the exit event itself was missed.
+		if ev.CPUUserMS != 0 || ev.CPUSysMS != 0 || ev.MaxRSSKB != 0 {
+			for i := len(s.rep.Processes) - 1; i >= 0; i-- {
+				if p := s.rep.Processes[i]; p.PID == ev.PID {
+					if p.CPUUserMS == 0 && p.CPUSysMS == 0 && p.MaxRSSKB == 0 {
+						p.CPUUserMS, p.CPUSysMS, p.MaxRSSKB = ev.CPUUserMS, ev.CPUSysMS, ev.MaxRSSKB
+					}
+					break
+				}
+			}
+		}
 	case "session_end":
 		if hasTS {
 			s.sessionEndT = ts
@@ -411,6 +433,7 @@ func (b *builder) add(ev *rawEvent) {
 			if p != nil {
 				p.endT = ts
 				p.hasEnd = true
+				p.CPUUserMS, p.CPUSysMS, p.MaxRSSKB = ev.CPUUserMS, ev.CPUSysMS, ev.MaxRSSKB
 				delete(s.open, ev.PID)
 			}
 		}
@@ -1134,7 +1157,11 @@ func writeText(w io.Writer, rep *Report) {
 			if p.OpenEnded {
 				endNote = " (still running at capture end)"
 			}
-			fmt.Fprintf(w, "  %s%s pid=%d ppid=%d  %.3fs%s\n", indent, p.Label, p.PID, p.PPID, float64(p.DurationMs)/1000, endNote)
+			resNote := ""
+			if p.CPUUserMS != 0 || p.CPUSysMS != 0 || p.MaxRSSKB != 0 {
+				resNote = fmt.Sprintf("  cpu_user=%dms cpu_sys=%dms max_rss=%dKiB", p.CPUUserMS, p.CPUSysMS, p.MaxRSSKB)
+			}
+			fmt.Fprintf(w, "  %s%s pid=%d ppid=%d  %.3fs%s%s\n", indent, p.Label, p.PID, p.PPID, float64(p.DurationMs)/1000, endNote, resNote)
 			if len(p.Argv) > 0 {
 				fmt.Fprintf(w, "  %s  argv: %s  cwd: %s\n", indent, strings.Join(p.Argv, " "), p.Cwd)
 			}

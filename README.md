@@ -175,7 +175,7 @@ that syscall rates are unavailable.
 
 With `--enable-syscall-summary`, the loader also synthesises
 `syscall_summary` events into the JSONL stream. The kernel counts per
-(session, TGID, syscall number) — ABI v3 — and userspace turns snapshots
+(session, TGID, syscall number) — ABI v4 — and userspace turns snapshots
 of that map into delta events. One event is emitted every `--syscall-interval`
 (default `1s`; `0` disables the periodic emission), plus a final flush
 for a session just before its `session_end` and for all live sessions
@@ -206,7 +206,8 @@ Example:
 
 A session is a process tree, not just its root process. When the
 agent's root process exits, the loader emits a `root_exit` event
-(same identity fields as the root's `exit` event, plus `exit_code`)
+(same identity fields as the root's `exit` event, plus the exit
+resource fields below)
 and the session stays open while any tracked child processes remain
 alive; their file/network/syscall activity keeps being attributed to
 the session, and the final `syscall_summary` flush still precedes the
@@ -222,12 +223,29 @@ long a session may outlive its root. `loupe-timeline` and
 `loupe-scorecard` report the gap between `root_exit` and `session_end`
 (the orphan window), the end reason, and any still-running TGIDs.
 
+#### Per-process CPU and peak memory on `exit` / `root_exit` (ABI v4)
+
+Every `exit` event — and the `root_exit` event that mirrors the root's
+exit — carries the exiting process's own resource usage, sampled
+in-kernel at `sched_process_exit`, so even short-lived tools that are
+gone before any `/proc` sampling could see them have numbers:
+
+| Field | Meaning |
+|---|---|
+| `cpu_user_ms` | Thread-group user CPU time, milliseconds (floor of the kernel ns total). "Self" only: the group's own threads (already-exited threads folded into `signal->utime` plus the exiting leader's `utime`); reaped children (`cutime`) are excluded — each child reports its own. Threads still alive when the leader exits are not included. |
+| `cpu_sys_ms` | Same, for system CPU time (`stime`). |
+| `max_rss_kb` | Peak resident set size of the thread group, in KiB (kernel `signal->maxrss`, the `ru_maxrss` unit). `task->mm` is already dropped at this hook, so the kernel-side hiwater folded into `signal->maxrss` by `exit_mm` is the valid source. `0` if the task never had an mm. |
+
+These complement — not replace — the `cpu_user_ms`/`cpu_sys_ms` on
+`session_end`, which remain the session **root's** totals sampled from
+`/proc` and say nothing about child tools.
+
 Useful loader flags: `--drop-path-prefix /proc/` (repeatable) suppresses
 file-event noise (e.g. agents polling their own `/proc/<pid>/stat`);
 `session_end` events carry `cpu_user_ms`/`cpu_sys_ms` (session root
 process CPU, sampled from `/proc`). Network events cover TCP and UDP;
 connects to port 53 are flagged `"dns": true` (no payload parsing).
-Paths/argv are captured up to 512 bytes (ABI v3); `comm` remains capped
+Paths/argv are captured up to 512 bytes (ABI v4); `comm` remains capped
 at 16 chars by the kernel (`TASK_COMM_LEN`) — use exec `filename`/`argv`
 to disambiguate. `--force-tracepoint-mode` forces the tracepoint
 fallback probe set even when BPF LSM is available, so the fallback
@@ -308,6 +326,7 @@ Three layers, deliberately kept separate:
 | Same host | LSM, `--catalog-only claude-code` under plain `sudo` | Catalog resolved the per-user install (`SUDO_USER` home), adopted 1 already-running Claude Code process tree, 29,035 events in 87s with zero ring-buffer drops / lost counters, reduced with `loupe-scorecard`, 2026-10-29 |
 | Same host | LSM, `--config configs/loupe-demo.yaml --enable-syscall-summary` | Adopted an already-running Claude Code tree (child `gh` attributed per-program) alongside 2× `loupe_demo.py` sessions; 392 events / 75 syscall_summary in 120s, zero ring-buffer drops or lost counters; `root_exit` + `session_end` (`all_exited`) verified live; reduced with loupe-scorecard and loupe-timeline (text + HTML), 2026-10-30 |
 | Same host | Tracepoint fallback, `--force-tracepoint-mode` (`FORCE_TP=1 make demo`) | Fallback probe set (`handle_exec_tp`, `handle_file_sys_enter/exit`) loaded and attached; adopted Claude Code tree plus 2× `loupe_demo.py` sessions with correct file/net attribution at raw-arg path fidelity, zero ring-buffer drops; `root_exit` + `session_end` (`all_exited`) verified, 2026-10-30 |
+| Same host | LSM (integration + `make demo`) and tracepoint fallback (`FORCE_TP=1 make demo`), ABI v4 | Per-process CPU / peak RSS on `exit`/`root_exit` verified live in both modes: `sudo make integration` **PASS** (all 4 tests, zero ring-buffer drops); demo `exit` events carried plausible values in both modes (e.g. `echo` cpu 0–2ms / RSS ≈3.5 MB, `python3` cpu ≈20–30ms / RSS ≈3.7 MB), zero ring-buffer drops, 2026-10-30 |
 
 Not yet tested on a live kernel:
 

@@ -101,7 +101,7 @@ function render(){
    body+='<text class="lbl" x="'+(4+indent)+'" y="'+(yy+13)+'">'+esc(p.label)+' · '+p.pid+(p.open_ended?' · still running':'')+'</text>';
    const x0=x(Math.max(p.start_ms,v0)),x1=x(Math.min(p.end_ms,v1));
    if(x1>x0&&p.end_ms>=v0&&p.start_ms<=v1){
-    const tipText=p.label+'\npid '+p.pid+' ppid '+p.ppid+'\n'+(p.filename||'')+'\nargv: '+((p.argv||[]).join(' '))+'\ncwd: '+(p.cwd||'')+'\nstart +'+fmtDur(p.start_ms)+'  end +'+fmtDur(p.end_ms)+'  duration '+fmtDur(p.duration_ms)+(p.open_ended?'\nstill running at capture end':'');
+    const tipText=p.label+'\npid '+p.pid+' ppid '+p.ppid+'\n'+(p.filename||'')+'\nargv: '+((p.argv||[]).join(' '))+'\ncwd: '+(p.cwd||'')+'\nstart +'+fmtDur(p.start_ms)+'  end +'+fmtDur(p.end_ms)+'  duration '+fmtDur(p.duration_ms)+(p.open_ended?'\nstill running at capture end':'')+((p.cpu_user_ms||p.cpu_sys_ms||p.max_rss_kb)?'\ncpu_user '+(p.cpu_user_ms||0)+'ms  cpu_sys '+(p.cpu_sys_ms||0)+'ms  max_rss '+(p.max_rss_kb||0)+'KiB':'');
     body+='<rect x="'+x0+'" y="'+(yy+3)+'" width="'+Math.max(2,x1-x0)+'" height="12" rx="3" fill="var(--bar)" opacity="'+(p.open_ended?0.55:0.9)+'" data-tip="'+esc(tipText)+'"><title>'+esc(tipText)+'</title></rect>';
    }
   });

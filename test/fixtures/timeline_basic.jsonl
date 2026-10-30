@@ -8,12 +8,12 @@
 {"ts":"2026-01-01T00:00:01.200Z","type":"fork","session_id":200,"agent_name":"claude-code","comm":"claude","pid":2000,"ppid":1,"child_pid":2001}
 {"ts":"2026-01-01T00:00:01.300Z","type":"exec","session_id":200,"agent_name":"claude-code","comm":"python3","pid":2001,"ppid":2000,"filename":"/usr/bin/python3","argv":["python3","script.py"],"cwd":"/work2"}
 {"ts":"2026-01-01T00:00:01.500Z","type":"file_open","session_id":100,"agent_name":"claude-code","comm":"claude","pid":1000,"ppid":1,"path":"/tmp/a.txt","open_flags":0}
-{"ts":"2026-01-01T00:00:02Z","type":"exit","session_id":100,"agent_name":"claude-code","comm":"echo","pid":1001,"ppid":1000}
+{"ts":"2026-01-01T00:00:02Z","type":"exit","session_id":100,"agent_name":"claude-code","comm":"echo","pid":1001,"ppid":1000,"exit_code":0,"cpu_user_ms":1,"cpu_sys_ms":1,"max_rss_kb":2048}
 {"ts":"2026-01-01T00:00:02Z","type":"syscall_summary","session_id":100,"agent_name":"claude-code","interval_ms":1000,"counts":{"read":5,"openat":3,"unlink":1},"per_process_counts":{"1000":{"read":4,"openat":2},"1001":{"read":1,"openat":1,"unlink":1}}}
 {"ts":"2026-01-01T00:00:02Z","type":"syscall_summary","session_id":200,"agent_name":"claude-code","interval_ms":1000,"counts":{"read":7,"mmap":9},"per_process_counts":{"2001":{"read":7,"mmap":9}}}
 {"ts":"2026-01-01T00:00:02Z","type":"file_unlink","session_id":200,"agent_name":"claude-code","comm":"python3","pid":2001,"ppid":2000,"path":"/tmp/gone"}
 {"ts":"2026-01-01T00:00:02.200Z","type":"file_open","session_id":200,"agent_name":"claude-code","comm":"python3","pid":2001,"ppid":2000,"path":"/etc/hostname","open_flags":32768}
 {"ts":"2026-01-01T00:00:02.500Z","type":"net_connect","session_id":100,"agent_name":"claude-code","comm":"claude","pid":1000,"ppid":1,"daddr":"127.0.0.1","dport":53,"protocol":17,"dns":true}
 {"ts":"2026-01-01T00:00:03Z","type":"net_connect","session_id":100,"agent_name":"claude-code","comm":"claude","pid":1000,"ppid":1,"daddr":"93.184.216.34","dport":443,"protocol":6}
-{"ts":"2026-01-01T00:00:04Z","type":"exit","session_id":100,"agent_name":"claude-code","comm":"claude","pid":1000,"ppid":1}
+{"ts":"2026-01-01T00:00:04Z","type":"exit","session_id":100,"agent_name":"claude-code","comm":"claude","pid":1000,"ppid":1,"exit_code":0,"cpu_user_ms":120,"cpu_sys_ms":30,"max_rss_kb":51200}
 {"ts":"2026-01-01T00:00:04Z","type":"session_end","session_id":100,"agent_name":"claude-code","comm":"claude","pid":1000,"ppid":1}

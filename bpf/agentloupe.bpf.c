@@ -345,10 +345,70 @@ int handle_exit(struct exit_raw_args *ctx)
 	if (in_scope(tgid, &sid, &info)) {
 		hdr = reserve_event(EVENT_EXIT, EVLEN_EXIT, sid, &info, task, tgid);
 		if (hdr) {
+			struct signal_struct *signal;
+
 			ev = (struct ev_exit *)(void *)(hdr + 1);
 			ev->exit_code = BPF_CORE_READ(task, exit_code);
 			if (ev->exit_code != 0)
 				hdr->flags |= EVENT_F_ERROR;
+			/*
+			 * Per-process CPU + peak RSS for the exiting thread
+			 * group. This is the short-lived-tool counterpart of
+			 * the /proc-sampled session-root CPU on session_end:
+			 * sampled here, in-kernel, the process cannot outrun
+			 * it, and every tracked TGID gets numbers, not just
+			 * session roots.
+			 *
+			 * CPU: signal->utime/stime hold the cputime of group
+			 * threads that have ALREADY exited (a dead thread's
+			 * task cputime is folded into its signal_struct during
+			 * teardown); the exiting leader's own has not been
+			 * folded in yet at this tracepoint, so add
+			 * task->utime/stime. signal->cutime/cstime are
+			 * deliberately NOT added: those are reaped CHILDREN
+			 * (wait4 rusage), and every child tool emits its own
+			 * exit event with its own numbers — adding them here
+			 * would double-count and make the parent's number
+			 * "inclusive" instead of "self". Caveats: threads of
+			 * the group still alive when the leader exits are not
+			 * summed (that would need a thread-list walk; their
+			 * later exits emit no exit event, pid != tgid), so for
+			 * multithreaded processes this is leader + already-dead
+			 * threads — exact for the single-threaded tools that
+			 * dominate agent process trees.
+			 *
+			 * Units: task/signal utime+stime are __u64 NANOSECONDS
+			 * on every supported kernel (the cputime-to-nsecs
+			 * conversion predates the 5.8 floor) — unlike
+			 * /proc/<pid>/stat fields 14/15, which are USER_HZ
+			 * ticks and must NOT be used to rescale these.
+			 *
+			 * Peak RSS: signal->maxrss, not mm->hiwater_rss. By
+			 * the time sched_process_exit fires, do_exit() has
+			 * already run exit_mm(): task->mm may be NULL and the
+			 * mm may be gone, but exit_mm() folds the mm's
+			 * hiwater into signal->maxrss (setmax_mm_hiwater_rss)
+			 * and signal_struct lives until the group is reaped,
+			 * so it is the source that is valid at this hook. It
+			 * is already stored in KiB (the kernel does the
+			 * pages->KiB conversion), so no PAGE_SHIFT assumption
+			 * (4K/16K/64K arm64) is needed here. Like the CPU
+			 * fields it is a thread-GROUP figure (threads share
+			 * one mm), in KiB; 0 if the task never had an mm.
+			 *
+			 * Cost: one pointer chase + five scalar CO-RE reads,
+			 * no loops, no extra stack — handle_exit is shared by
+			 * the LSM and tracepoint-fallback probe sets and must
+			 * stay well inside the fallback's verifier budget.
+			 */
+			signal = BPF_CORE_READ(task, signal);
+			if (signal) {
+				ev->cpu_user_ns = BPF_CORE_READ(signal, utime) +
+						  BPF_CORE_READ(task, utime);
+				ev->cpu_sys_ns = BPF_CORE_READ(signal, stime) +
+						 BPF_CORE_READ(task, stime);
+				ev->max_rss_kb = BPF_CORE_READ(signal, maxrss);
+			}
 			submit_event(hdr, EVENT_EXIT);
 		}
 	}

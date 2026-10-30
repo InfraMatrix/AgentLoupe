@@ -60,7 +60,9 @@ func spawnOrphan(proc *Processor) {
 	proc.Process(orphanEvent(1, 100, map[string]any{"filename": "/usr/bin/agent"}))
 	proc.Process(orphanEvent(2, 100, map[string]any{"child_pid": uint32(101)}))
 	proc.Process(orphanEvent(1, 101, map[string]any{"filename": "/usr/bin/helper"}))
-	proc.Process(orphanEvent(3, 100, map[string]any{"exit_code": int32(3)}))
+	proc.Process(orphanEvent(3, 100, map[string]any{
+		"exit_code": int32(3), "cpu_user_ms": uint64(12), "cpu_sys_ms": uint64(3), "max_rss_kb": uint64(45678),
+	}))
 }
 
 func TestOrphanChildExitsOnItsOwn(t *testing.T) {
@@ -79,6 +81,14 @@ func TestOrphanChildExitsOnItsOwn(t *testing.T) {
 	rootExit := findType(out, "root_exit")
 	if rootExit == nil || rootExit.PID != 100 || rootExit.Fields["exit_code"] != int32(3) {
 		t.Errorf("root_exit = %+v, want pid 100 exit_code 3", rootExit)
+	}
+	// root_exit mirrors the root exit's per-process CPU / peak RSS.
+	if rootExit != nil {
+		for k, want := range map[string]uint64{"cpu_user_ms": 12, "cpu_sys_ms": 3, "max_rss_kb": 45678} {
+			if got := rootExit.Fields[k]; got != want {
+				t.Errorf("root_exit %s = %v, want %d", k, got, want)
+			}
+		}
 	}
 	if !proc.HasStarted(42) {
 		t.Error("session marked ended while orphan still alive")

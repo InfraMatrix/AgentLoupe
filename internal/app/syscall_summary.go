@@ -280,7 +280,8 @@ func (s *SyscallSummarizer) forgetLocked(sid uint64) {
 
 // snapshotSyscallCounts reads the kernel syscall_counts map into a
 // (sid, tgid, nr) -> cumulative count map. Shared by the stderr dump and
-// the JSONL summarizer. Key layout mirrors struct syscall_key (ABI v3):
+// the JSONL summarizer. Key layout mirrors struct syscall_key (tgid
+// added in ABI v3, unchanged since):
 // session_id [0:8], tgid [8:12], syscall_nr [12:16].
 func snapshotSyscallCounts(l *Loader) (map[syscallKey]uint64, error) {
 	out := map[syscallKey]uint64{}
