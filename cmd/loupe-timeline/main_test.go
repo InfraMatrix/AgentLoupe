@@ -168,6 +168,229 @@ func TestBuildTimelineBasic(t *testing.T) {
 	}
 }
 
+func TestBuildTimelineMultiAgent(t *testing.T) {
+	rep := buildFixture(t, "timeline_multi_agent.jsonl")
+	if len(rep.Sessions) != 2 {
+		t.Fatalf("sessions = %d, want 2 overlapping sessions of different agents", len(rep.Sessions))
+	}
+	if !rep.HasSyscallSummary {
+		t.Error("HasSyscallSummary = false")
+	}
+	if rep.CaptureStart != "2026-01-01T00:00:00Z" || rep.DurationMs != 4000 {
+		t.Errorf("capture %s .. +%dms", rep.CaptureStart, rep.DurationMs)
+	}
+	sClaude := sessionByID(rep, 300)
+	sAider := sessionByID(rep, 400)
+	if sClaude == nil || sAider == nil {
+		t.Fatal("missing session")
+	}
+	// Two different agents, overlapping in time (aider starts at +500ms,
+	// claude runs 0..4s), kept as separate sessions.
+	if sClaude.Agent != "claude-code" || sAider.Agent != "aider" {
+		t.Errorf("agents = %q / %q", sClaude.Agent, sAider.Agent)
+	}
+	if sClaude.RootComm != "claude" || sAider.RootComm != "python3" {
+		t.Errorf("roots = %q / %q", sClaude.RootComm, sAider.RootComm)
+	}
+	if sClaude.Start != "2026-01-01T00:00:00Z" || sAider.Start != "2026-01-01T00:00:00.5Z" {
+		t.Errorf("starts = %s / %s, want aider to start inside claude's window", sClaude.Start, sAider.Start)
+	}
+
+	// Separate processes: no PID, label, or tree nesting leaks across
+	// sessions, even though both sessions are alive at the same time.
+	pidsOf := func(s *SessionReport) map[uint32]*Process {
+		t.Helper()
+		out := map[uint32]*Process{}
+		for _, p := range s.Processes {
+			out[p.PID] = p
+		}
+		return out
+	}
+	claudeProcs, aiderProcs := pidsOf(sClaude), pidsOf(sAider)
+	if len(claudeProcs) != 2 || claudeProcs[3000] == nil || claudeProcs[3001] == nil {
+		t.Errorf("claude processes = %+v", sClaude.Processes)
+	}
+	if len(aiderProcs) != 2 || aiderProcs[4000] == nil || aiderProcs[4001] == nil {
+		t.Errorf("aider processes = %+v", sAider.Processes)
+	}
+	for pid := range claudeProcs {
+		if aiderProcs[pid] != nil {
+			t.Errorf("pid %d appears in both sessions", pid)
+		}
+	}
+	if p := claudeProcs[3001]; p == nil || p.Label != "echo" || p.Depth != 1 || p.PPID != 3000 || p.Cwd != "/work/alpha" {
+		t.Errorf("claude child = %+v", p)
+	}
+	if p := aiderProcs[4001]; p == nil || p.Label != "git" || p.Depth != 1 || p.PPID != 4000 || p.Cwd != "/work/beta" {
+		t.Errorf("aider child = %+v", p)
+	}
+	if p := aiderProcs[4000]; p == nil || !p.OpenEnded || p.EndMs != 4000 {
+		t.Errorf("aider root open-ended = %+v, want still running at capture end", p)
+	}
+
+	// Separate categories: same-named syscalls (read/mmap/futex/connect)
+	// are counted per session, and each session's mix stays distinct.
+	catsOf := func(s *SessionReport) map[string]uint64 {
+		out := map[string]uint64{}
+		for _, c := range s.SyscallCategories {
+			out[c.Name] = c.Count
+		}
+		return out
+	}
+	if got, want := catsOf(sClaude), map[string]uint64{"file": 21, "memory": 40, "sync/wait": 30, "process": 1, "network": 2}; !equalCounts(got, want) {
+		t.Errorf("claude categories = %v, want %v", got, want)
+	}
+	if got, want := catsOf(sAider), map[string]uint64{"file": 17, "memory": 9, "sync/wait": 5, "process": 1, "network": 4}; !equalCounts(got, want) {
+		t.Errorf("aider categories = %v, want %v", got, want)
+	}
+
+	// Per-program attribution: each session rolls its own TGIDs up to
+	// the program that TGID exec'd, with no cross-session programs.
+	if len(sClaude.ProgramSyscalls) != 2 ||
+		sClaude.ProgramSyscalls[0].Program != "claude" || sClaude.ProgramSyscalls[0].Total != 91 ||
+		sClaude.ProgramSyscalls[1].Program != "echo" || sClaude.ProgramSyscalls[1].Total != 3 {
+		t.Errorf("claude program syscalls = %+v", sClaude.ProgramSyscalls)
+	}
+	if len(sAider.ProgramSyscalls) != 2 ||
+		sAider.ProgramSyscalls[0].Program != "python3" || sAider.ProgramSyscalls[0].Total != 23 ||
+		sAider.ProgramSyscalls[1].Program != "git" || sAider.ProgramSyscalls[1].Total != 13 {
+		t.Errorf("aider program syscalls = %+v", sAider.ProgramSyscalls)
+	}
+	for _, ps := range sClaude.ProgramSyscalls {
+		for _, pid := range ps.PIDs {
+			if pid != 3000 && pid != 3001 {
+				t.Errorf("claude program %q attributed to foreign pid %d", ps.Program, pid)
+			}
+		}
+	}
+	for _, ps := range sAider.ProgramSyscalls {
+		for _, pid := range ps.PIDs {
+			if pid != 4000 && pid != 4001 {
+				t.Errorf("aider program %q attributed to foreign pid %d", ps.Program, pid)
+			}
+		}
+	}
+	// The child programs' own category mixes are attributed, not merged
+	// into their session root's.
+	if len(sAider.ProgramSyscalls) == 2 {
+		gitCats := map[string]uint64{}
+		for _, c := range sAider.ProgramSyscalls[1].Categories {
+			gitCats[c.Name] = c.Count
+		}
+		if want := map[string]uint64{"file": 7, "sync/wait": 5, "process": 1}; !equalCounts(gitCats, want) {
+			t.Errorf("git categories = %v, want %v", gitCats, want)
+		}
+	}
+
+	// Files/network markers stay in their own session.
+	if len(sClaude.Files) != 1 || sClaude.Files[0].Path != "/tmp/alpha.txt" ||
+		len(sClaude.Network) != 1 || sClaude.Network[0].Dest != "93.184.216.34:443" ||
+		sClaude.MarkerTotal != 2 {
+		t.Errorf("claude files/network/markers = %v %v total=%d", sClaude.Files, sClaude.Network, sClaude.MarkerTotal)
+	}
+	if len(sAider.Files) != 2 || sAider.Files[0].Path == sAider.Files[1].Path ||
+		len(sAider.Network) != 1 || sAider.Network[0].Dest != "127.0.0.1:53" || sAider.Network[0].DNS != 1 ||
+		sAider.MarkerTotal != 3 {
+		t.Errorf("aider files/network/markers = %v %v total=%d", sAider.Files, sAider.Network, sAider.MarkerTotal)
+	}
+	for _, f := range sAider.Files {
+		if f.Path == "/tmp/alpha.txt" {
+			t.Error("claude file leaked into aider session")
+		}
+	}
+}
+
+func TestBuildTimelineOrphan(t *testing.T) {
+	rep := buildFixture(t, "timeline_orphan.jsonl")
+	if len(rep.Sessions) != 2 {
+		t.Fatalf("sessions = %d, want 2", len(rep.Sessions))
+	}
+	if rep.DurationMs != 5000 {
+		t.Errorf("capture duration = %dms, want 5000", rep.DurationMs)
+	}
+	s500 := sessionByID(rep, 500)
+	s600 := sessionByID(rep, 600)
+	if s500 == nil || s600 == nil {
+		t.Fatal("missing session")
+	}
+
+	// Session 500: the orphan outlives the root, keeps working under the
+	// same session, then exits on its own: reason all_exited, gap 3s.
+	if s500.RootExit != "2026-01-01T00:00:02Z" || s500.RootExitMs != 2000 {
+		t.Errorf("s500 root exit = %q +%dms", s500.RootExit, s500.RootExitMs)
+	}
+	if s500.OrphanGapMs != 3000 {
+		t.Errorf("s500 orphan gap = %dms, want 3000", s500.OrphanGapMs)
+	}
+	if s500.SessionEndReason != "all_exited" || len(s500.StillRunning) != 0 {
+		t.Errorf("s500 end reason/still = %q %v", s500.SessionEndReason, s500.StillRunning)
+	}
+	if len(s500.Files) != 1 || s500.Files[0].Path != "/tmp/orphan.txt" {
+		t.Errorf("s500 files = %v, want orphan activity after root exit", s500.Files)
+	}
+	// The orphan's post-root-exit syscalls are attributed to the orphan's
+	// program (echo), not dropped and not folded into the root.
+	if len(s500.ProgramSyscalls) != 2 ||
+		s500.ProgramSyscalls[0].Program != "claude" || s500.ProgramSyscalls[0].Total != 10 ||
+		s500.ProgramSyscalls[1].Program != "echo" || s500.ProgramSyscalls[1].Total != 6 {
+		t.Errorf("s500 program syscalls = %+v", s500.ProgramSyscalls)
+	}
+	// Both processes closed (the orphan's exit closed the session).
+	for _, p := range s500.Processes {
+		if p.OpenEnded {
+			t.Errorf("s500 process %s unexpectedly open-ended", p.Label)
+		}
+	}
+
+	// Session 600: the orphan outlives the orphan timeout: reason
+	// orphan_timeout, still_running lists the surviving TGID, gap 2.5s.
+	if s600.RootExit != "2026-01-01T00:00:01.5Z" || s600.RootExitMs != 1500 {
+		t.Errorf("s600 root exit = %q +%dms", s600.RootExit, s600.RootExitMs)
+	}
+	if s600.OrphanGapMs != 2500 {
+		t.Errorf("s600 orphan gap = %dms, want 2500", s600.OrphanGapMs)
+	}
+	if s600.SessionEndReason != "orphan_timeout" {
+		t.Errorf("s600 end reason = %q", s600.SessionEndReason)
+	}
+	if len(s600.StillRunning) != 1 || s600.StillRunning[0] != 6001 {
+		t.Errorf("s600 still running = %v, want [6001]", s600.StillRunning)
+	}
+	// The timed-out orphan never exited within the capture.
+	var git *Process
+	for _, p := range s600.Processes {
+		if p.Label == "git" {
+			git = p
+		}
+	}
+	if git == nil || !git.OpenEnded {
+		t.Errorf("s600 orphan process = %+v, want still running at capture end", git)
+	}
+
+	// Text rendering shows the orphan gap and reason.
+	var sb strings.Builder
+	writeText(&sb, rep)
+	out := sb.String()
+	for _, want := range []string{"root exit: +2.00s", "orphan gap to session_end: 3.00s (reason all_exited)",
+		"root exit: +1.50s", "orphan gap to session_end: 2.50s (reason orphan_timeout, still running: [6001])"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("text output missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func equalCounts(got, want map[string]uint64) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	for k, v := range want {
+		if got[k] != v {
+			return false
+		}
+	}
+	return true
+}
+
 func TestBuildNoSyscallSummaryTolerated(t *testing.T) {
 	rep := buildFixture(t, "timeline_no_syscall.jsonl")
 	if rep.HasSyscallSummary {

@@ -26,12 +26,16 @@ type Options struct {
 	EnableFileMutations  bool
 	StatsInterval        time.Duration
 	SyscallInterval      time.Duration
-	DropPathPrefixes     []string
-	AttachPIDs           []int
-	AttachComms          []string
-	AttachExes           []string
-	UseCatalog           bool
-	CatalogOnly          []string
+	// OrphanTimeout bounds how long a session stays open after its
+	// root exits while tracked processes remain (0 = wait
+	// indefinitely). See Processor.OrphanTimeout.
+	OrphanTimeout    time.Duration
+	DropPathPrefixes []string
+	AttachPIDs       []int
+	AttachComms      []string
+	AttachExes       []string
+	UseCatalog       bool
+	CatalogOnly      []string
 }
 
 type progReq struct {
@@ -220,6 +224,9 @@ func featureProbe(logf func(string, ...any)) (lsmMode bool) {
 }
 
 func Run(ctx context.Context, o Options) error {
+	if o.OrphanTimeout < 0 {
+		return fmt.Errorf("orphan timeout must be >= 0 (0 = wait indefinitely), got %s", o.OrphanTimeout)
+	}
 	logf := func(format string, args ...any) {
 		fmt.Fprintf(os.Stderr, "agentloupe: "+format+"\n", args...)
 	}
@@ -350,6 +357,7 @@ func Run(ctx context.Context, o Options) error {
 	wallBase := wallBaseTime()
 	proc := NewProcessor(loader, wallBase, writeJSON)
 	proc.DropPrefixes = o.DropPathPrefixes
+	proc.OrphanTimeout = o.OrphanTimeout
 
 	// syscall_summary JSONL emission (userspace-synthesised; no kernel
 	// change). Final flush runs from the session_end hook in the

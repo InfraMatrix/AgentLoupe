@@ -62,6 +62,7 @@ func maintenance(ctx context.Context, l *Loader, proc *Processor, o Options, log
 			return
 		case now := <-ticker.C:
 			proc.Expire()
+			proc.ExpireOrphans()
 			l.sampleTrackedCPU()
 			if now.Sub(lastAdopt) >= 5*time.Second {
 				lastAdopt = now

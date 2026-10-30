@@ -281,11 +281,11 @@ func TestProcessorFlushBeforeSessionEnd(t *testing.T) {
 	}
 	out = nil
 	proc.Process(exit)
-	if len(out) != 3 || out[0].Type != "exit" || out[1].Type != "syscall_summary" || out[2].Type != "session_end" {
+	if len(out) != 4 || out[0].Type != "exit" || out[1].Type != "root_exit" || out[2].Type != "syscall_summary" || out[3].Type != "session_end" {
 		types := []string{}
 		for _, o := range out {
 			types = append(types, o.Type)
 		}
-		t.Fatalf("order = %v, want [exit syscall_summary session_end]", types)
+		t.Fatalf("order = %v, want [exit root_exit syscall_summary session_end]", types)
 	}
 }

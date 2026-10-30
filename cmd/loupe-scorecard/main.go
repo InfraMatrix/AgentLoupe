@@ -16,50 +16,60 @@ import (
 )
 
 type event struct {
-	Ts        string `json:"ts"`
-	Type      string `json:"type"`
-	SessionID uint64 `json:"session_id"`
-	AgentName string `json:"agent_name"`
-	Comm      string `json:"comm"`
-	Filename  string `json:"filename"`
-	Path      string `json:"path"`
-	OldPath   string `json:"old_path"`
-	NewPath   string `json:"new_path"`
-	Daddr     string `json:"daddr"`
-	Dport     uint16 `json:"dport"`
-	DNS       bool   `json:"dns"`
-	Protocol  uint8  `json:"protocol"`
-	ReadB     uint64 `json:"read_bytes"`
-	WriteB    uint64 `json:"write_bytes"`
-	Partial   bool   `json:"partial"`
-	CPUUserMS uint64 `json:"cpu_user_ms"`
-	CPUSysMS  uint64 `json:"cpu_sys_ms"`
-	Duration  uint64 `json:"duration_ms"`
+	Ts           string   `json:"ts"`
+	Type         string   `json:"type"`
+	SessionID    uint64   `json:"session_id"`
+	AgentName    string   `json:"agent_name"`
+	Comm         string   `json:"comm"`
+	Filename     string   `json:"filename"`
+	Path         string   `json:"path"`
+	OldPath      string   `json:"old_path"`
+	NewPath      string   `json:"new_path"`
+	Daddr        string   `json:"daddr"`
+	Dport        uint16   `json:"dport"`
+	DNS          bool     `json:"dns"`
+	Protocol     uint8    `json:"protocol"`
+	ReadB        uint64   `json:"read_bytes"`
+	WriteB       uint64   `json:"write_bytes"`
+	Partial      bool     `json:"partial"`
+	CPUUserMS    uint64   `json:"cpu_user_ms"`
+	CPUSysMS     uint64   `json:"cpu_sys_ms"`
+	Duration     uint64   `json:"duration_ms"`
+	Reason       string   `json:"reason"`
+	StillRunning []uint32 `json:"still_running"`
 }
 
 type scorecard struct {
-	SessionID        uint64         `json:"session_id"`
-	Agent            string         `json:"agent"`
-	Start            string         `json:"start,omitempty"`
-	End              string         `json:"end,omitempty"`
-	DurationS        float64        `json:"duration_s"`
-	Events           int            `json:"events"`
-	Execs            int            `json:"execs"`
-	Forks            int            `json:"forks"`
-	Exits            int            `json:"exits"`
-	Opens            int            `json:"file_opens"`
-	UniqPaths        int            `json:"unique_paths"`
-	Mutations        int            `json:"mutations"`
-	ReadBytes        uint64         `json:"read_bytes"`
-	WriteBytes       uint64         `json:"write_bytes"`
-	Connects         int            `json:"net_connects"`
-	DNS              int            `json:"dns_connects"`
-	CPUUserMS        uint64         `json:"cpu_user_ms,omitempty"`
-	CPUSysMS         uint64         `json:"cpu_sys_ms,omitempty"`
+	SessionID  uint64  `json:"session_id"`
+	Agent      string  `json:"agent"`
+	Start      string  `json:"start,omitempty"`
+	End        string  `json:"end,omitempty"`
+	DurationS  float64 `json:"duration_s"`
+	Events     int     `json:"events"`
+	Execs      int     `json:"execs"`
+	Forks      int     `json:"forks"`
+	Exits      int     `json:"exits"`
+	Opens      int     `json:"file_opens"`
+	UniqPaths  int     `json:"unique_paths"`
+	Mutations  int     `json:"mutations"`
+	ReadBytes  uint64  `json:"read_bytes"`
+	WriteBytes uint64  `json:"write_bytes"`
+	Connects   int     `json:"net_connects"`
+	DNS        int     `json:"dns_connects"`
+	CPUUserMS  uint64  `json:"cpu_user_ms,omitempty"`
+	CPUSysMS   uint64  `json:"cpu_sys_ms,omitempty"`
+	RootExit   string  `json:"root_exit,omitempty"`
+	// OrphanGapS is session_end minus root_exit, in seconds: how
+	// long the session outlived its root. Set only when both exist.
+	OrphanGapS       float64        `json:"orphan_gap_s,omitempty"`
+	SessionEndReason string         `json:"session_end_reason,omitempty"`
+	StillRunning     []uint32       `json:"still_running,omitempty"`
 	TopComms         map[string]int `json:"top_comms"`
 	TopDirs          map[string]int `json:"top_dirs"`
 	Net              map[string]int `json:"net_by_dest"`
 	first, last      time.Time
+	rootExitT        time.Time
+	sessionEndT      time.Time
 	paths            map[string]bool
 	comms, dirs, net map[string]int
 }
@@ -104,7 +114,9 @@ func summarize(events []event) []*scorecard {
 	for _, ev := range events {
 		s := get(ev)
 		s.Events++
+		var ts time.Time
 		if t, err := time.Parse(time.RFC3339Nano, ev.Ts); err == nil {
+			ts = t
 			if s.first.IsZero() || t.Before(s.first) {
 				s.first = t
 			}
@@ -141,7 +153,14 @@ func summarize(events []event) []*scorecard {
 				s.DNS++
 			}
 			s.net[fmt.Sprintf("%s:%d", ev.Daddr, ev.Dport)]++
+		case "root_exit":
+			if s.rootExitT.IsZero() {
+				s.rootExitT = ts
+			}
 		case "session_end":
+			s.sessionEndT = ts
+			s.SessionEndReason = ev.Reason
+			s.StillRunning = ev.StillRunning
 			s.CPUUserMS, s.CPUSysMS = ev.CPUUserMS, ev.CPUSysMS
 		}
 	}
@@ -152,6 +171,12 @@ func summarize(events []event) []*scorecard {
 		if !s.last.IsZero() {
 			s.End = s.last.Format(time.RFC3339)
 			s.DurationS = s.last.Sub(s.first).Seconds()
+		}
+		if !s.rootExitT.IsZero() {
+			s.RootExit = s.rootExitT.Format(time.RFC3339)
+			if !s.sessionEndT.IsZero() {
+				s.OrphanGapS = s.sessionEndT.Sub(s.rootExitT).Seconds()
+			}
 		}
 		s.UniqPaths = len(s.paths)
 		s.TopComms = top(s.comms, 5)
@@ -203,6 +228,10 @@ func main() {
 			s.Opens, s.UniqPaths, s.ReadBytes, s.WriteBytes, s.Connects, s.CPUUserMS, s.CPUSysMS)
 		fmt.Printf("    comms=%v dirs=%v net=%v dns=%d mutations=%d\n",
 			s.TopComms, s.TopDirs, s.Net, s.DNS, s.Mutations)
+		if s.RootExit != "" {
+			fmt.Printf("    root_exit=%s orphan_gap=%.1fs end_reason=%s still_running=%v\n",
+				s.RootExit, s.OrphanGapS, s.SessionEndReason, s.StillRunning)
+		}
 	}
 }
 

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -256,6 +257,21 @@ type pendingSession struct {
 	buffered []*Decoded
 }
 
+// liveSession tracks which TGIDs of a session have been seen and not
+// yet exited. A session ends when its root has exited AND this set is
+// empty ("all_exited"), or when the orphan timeout expires with
+// processes still in the set ("orphan_timeout"). exited remembers
+// TGIDs whose exit was already processed: teardown events for them
+// (file_close from deferred file freeing arrives after the exit event)
+// must not resurrect them into the alive set.
+type liveSession struct {
+	alive      map[uint32]bool
+	exited     map[uint32]bool
+	rootExited bool
+	rootExitAt time.Time // processing time of the root exit (timeout clock)
+	ended      bool
+}
+
 // Processor owns output ordering, provisional buffering and session
 // start/end synthesis. Buffering is userspace-side and bounded; on
 // reject or timeout the buffer is discarded and the kernel session is
@@ -266,6 +282,7 @@ type Processor struct {
 	write    func(Output) error
 	wallBase time.Time // wall clock corresponding to monotonic 0
 	pending  map[uint64]*pendingSession
+	live     map[uint64]*liveSession
 	decided  map[uint64]bool // session -> confirmed(true)/rejected(false)
 	started  map[uint64]bool
 	// startedMu guards only `started`, separately from mu: the syscall
@@ -276,12 +293,20 @@ type Processor struct {
 	DropPrefixes    []string // file paths with any of these prefixes are dropped
 	droppedFiltered int
 	// BeforeSessionEnd, if set, runs (synchronously, before the
-	// session_end line is written) when a session's root exits. Used to
-	// flush a final syscall_summary for the session. The hook must write
-	// via the same writer directly; it runs under p.mu.
+	// session_end line is written) when a session actually ends: its
+	// root has exited and its last tracked process has exited, or the
+	// orphan timeout expired. Used to flush a final syscall_summary
+	// for the session. The hook must write via the same writer
+	// directly; it runs under p.mu.
 	BeforeSessionEnd func(sid uint64)
 	// ForgetHook, if set, runs when Forget drops local session state.
 	ForgetHook func(sid uint64)
+	// OrphanTimeout bounds how long a session stays open after its
+	// root exits while tracked processes remain alive. On expiry the
+	// session ends with reason "orphan_timeout". Zero means wait
+	// indefinitely. Set by Run from Options; the zero value of a bare
+	// Processor is indefinite.
+	OrphanTimeout time.Duration
 }
 
 // DroppedFiltered reports how many events --drop-path-prefix suppressed.
@@ -324,6 +349,7 @@ func NewProcessor(ctrl SessionControl, wallBase time.Time, write func(Output) er
 	return &Processor{
 		ctrl: ctrl, write: write, wallBase: wallBase,
 		pending: make(map[uint64]*pendingSession),
+		live:    make(map[uint64]*liveSession),
 		decided: make(map[uint64]bool),
 		started: make(map[uint64]bool),
 	}
@@ -376,7 +402,66 @@ func (p *Processor) toOutput(d *Decoded, provisional bool) Output {
 	return out
 }
 
+func (p *Processor) liveFor(sid uint64) *liveSession {
+	st, ok := p.live[sid]
+	if !ok {
+		st = &liveSession{alive: map[uint32]bool{}, exited: map[uint32]bool{}}
+		p.live[sid] = st
+	}
+	return st
+}
+
+// endSessionLocked flushes (via BeforeSessionEnd) and writes the
+// session_end line, exactly once per session. template supplies the
+// identity fields (ts/pid/agent) of the end line: the triggering exit
+// event for "all_exited", a synthesised root-identity line for
+// "orphan_timeout". Runs under p.mu.
+func (p *Processor) endSessionLocked(sid uint64, template Output, reason string, stillRunning []uint32) {
+	st := p.liveFor(sid)
+	if st.ended {
+		return
+	}
+	st.ended = true
+	if p.BeforeSessionEnd != nil {
+		p.BeforeSessionEnd(sid)
+	}
+	end := template
+	end.Type = "session_end"
+	end.Fields = map[string]any{"reason": reason}
+	if len(stillRunning) > 0 {
+		end.Fields["still_running"] = stillRunning
+	}
+	if cp, ok := p.ctrl.(interface {
+		SessionCPU(uint64) (uint64, uint64, bool)
+	}); ok {
+		if u, s, ok := cp.SessionCPU(sid); ok {
+			end.Fields["cpu_user_ms"] = u
+			end.Fields["cpu_sys_ms"] = s
+		}
+	}
+	_ = p.write(end)
+	p.markEnded(sid)
+}
+
 func (p *Processor) emitLocked(d *Decoded, provisional bool) {
+	st := p.liveFor(d.SessionID)
+	if st.ended {
+		return // session already closed (e.g. orphan timeout): drop stragglers
+	}
+	// Track live TGIDs: any event proves its TGID alive — unless its
+	// exit was already processed (post-exit teardown events, e.g.
+	// file_close from deferred freeing, must not resurrect it). Fork
+	// also proves the child; a forked child_pid is a new process even
+	// if the TGID was seen dead before (PID reuse).
+	if d.Type != 3 && d.Tgid != 0 && !st.exited[d.Tgid] {
+		st.alive[d.Tgid] = true
+	}
+	if d.Type == 2 { // fork
+		if child, ok := d.Fields["child_pid"].(uint32); ok && child != 0 {
+			delete(st.exited, child)
+			st.alive[child] = true
+		}
+	}
 	if !p.markStarted(d.SessionID) {
 		start := p.toOutput(d, provisional)
 		start.Type = "session_start"
@@ -384,25 +469,64 @@ func (p *Processor) emitLocked(d *Decoded, provisional bool) {
 		_ = p.write(start)
 	}
 	_ = p.write(p.toOutput(d, provisional))
-	if d.Type == 3 { // exit
-		if meta, ok := p.ctrl.LookupMeta(d.SessionID); ok && meta.RootTGID == d.Tgid {
-			if p.BeforeSessionEnd != nil {
-				p.BeforeSessionEnd(d.SessionID)
-			}
-			end := p.toOutput(d, false)
-			end.Type = "session_end"
-			end.Fields = map[string]any{}
-			if cp, ok := p.ctrl.(interface {
-				SessionCPU(uint64) (uint64, uint64, bool)
-			}); ok {
-				if u, s, ok := cp.SessionCPU(d.SessionID); ok {
-					end.Fields["cpu_user_ms"] = u
-					end.Fields["cpu_sys_ms"] = s
-				}
-			}
-			_ = p.write(end)
-			p.markEnded(d.SessionID)
+	if d.Type != 3 { // not exit
+		return
+	}
+	delete(st.alive, d.Tgid)
+	st.exited[d.Tgid] = true
+	meta, hasMeta := p.ctrl.LookupMeta(d.SessionID)
+	isRoot := hasMeta && meta.RootTGID == d.Tgid
+	if isRoot && !st.rootExited {
+		st.rootExited = true
+		st.rootExitAt = time.Now()
+		// root_exit marks the root's death while the session may stay
+		// open for surviving tracked processes; the gap between this
+		// event and session_end is the orphan window.
+		rootExit := p.toOutput(d, false)
+		rootExit.Type = "root_exit"
+		rootExit.Fields = map[string]any{}
+		if code, ok := d.Fields["exit_code"]; ok {
+			rootExit.Fields["exit_code"] = code
 		}
+		_ = p.write(rootExit)
+	}
+	if st.rootExited && len(st.alive) == 0 {
+		p.endSessionLocked(d.SessionID, p.toOutput(d, false), "all_exited", nil)
+	}
+}
+
+// ExpireOrphans ends sessions whose root has exited but whose tracked
+// processes are still alive once OrphanTimeout has elapsed since the
+// root exit. Called periodically from maintenance; a no-op when the
+// timeout is zero (wait indefinitely).
+func (p *Processor) ExpireOrphans() {
+	if p.OrphanTimeout <= 0 {
+		return
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	now := time.Now()
+	var expired []uint64
+	for sid, st := range p.live {
+		if st.rootExited && !st.ended && len(st.alive) > 0 && now.Sub(st.rootExitAt) >= p.OrphanTimeout {
+			expired = append(expired, sid)
+		}
+	}
+	sort.Slice(expired, func(i, j int) bool { return expired[i] < expired[j] })
+	for _, sid := range expired {
+		st := p.live[sid]
+		still := make([]uint32, 0, len(st.alive))
+		for tgid := range st.alive {
+			still = append(still, tgid)
+		}
+		sort.Slice(still, func(i, j int) bool { return still[i] < still[j] })
+		template := Output{Ts: p.WallClockNow(), SessionID: sid}
+		if meta, ok := p.ctrl.LookupMeta(sid); ok {
+			template.AgentName = meta.AgentName
+			template.ParentSessionID = meta.ParentSID
+			template.PID = meta.RootTGID
+		}
+		p.endSessionLocked(sid, template, "orphan_timeout", still)
 	}
 }
 
@@ -515,6 +639,7 @@ func (p *Processor) Forget(sid uint64) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	delete(p.pending, sid)
+	delete(p.live, sid)
 	p.markEnded(sid)
 	if p.ForgetHook != nil {
 		p.ForgetHook(sid)

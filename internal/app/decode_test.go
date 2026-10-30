@@ -530,15 +530,24 @@ func TestProcessorJSONPipeline(t *testing.T) {
 		t.Errorf("provisional should be omitted when false: %s", b)
 	}
 
-	// Exit of the session root synthesises session_end.
+	// Exit of the session root synthesises root_exit, then session_end
+	// (no tracked processes remain in this session).
 	exit, err := Decode(buildRecord(3, 0, make([]byte, 8)))
 	if err != nil {
 		t.Fatal(err)
 	}
 	out = nil
 	proc.Process(exit)
-	if len(out) != 2 || out[0].Type != "exit" || out[1].Type != "session_end" {
-		t.Errorf("exit outputs = %v, want [exit session_end]", out)
+	if len(out) != 3 || out[0].Type != "exit" || out[1].Type != "root_exit" || out[2].Type != "session_end" {
+		t.Errorf("exit outputs = %v, want [exit root_exit session_end]", out)
+	}
+	if len(out) == 3 {
+		if out[1].Fields["exit_code"] != int32(0) {
+			t.Errorf("root_exit exit_code = %v, want 0", out[1].Fields["exit_code"])
+		}
+		if out[2].Fields["reason"] != "all_exited" {
+			t.Errorf("session_end reason = %v, want all_exited", out[2].Fields["reason"])
+		}
 	}
 }
 

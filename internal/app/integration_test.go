@@ -29,22 +29,27 @@ import (
 )
 
 type capturedEvent struct {
-	Raw        string
-	Type       string                       `json:"type"`
-	SessionID  uint64                       `json:"session_id"`
-	AgentName  string                       `json:"agent_name"`
-	PID        uint32                       `json:"pid"`
-	Comm       string                       `json:"comm"`
-	Filename   string                       `json:"filename"`
-	Path       string                       `json:"path"`
-	Daddr      string                       `json:"daddr"`
-	Dport      uint16                       `json:"dport"`
-	Protocol   uint8                        `json:"protocol"`
-	DNS        bool                         `json:"dns"`
-	Duration   *uint64                      `json:"duration_ms"`
-	Counts     map[string]uint64            `json:"counts"`
-	PerProcess map[string]map[string]uint64 `json:"per_process_counts"`
-	IntervalMS *int64                       `json:"interval_ms"`
+	Raw          string
+	Type         string                       `json:"type"`
+	SessionID    uint64                       `json:"session_id"`
+	AgentName    string                       `json:"agent_name"`
+	PID          uint32                       `json:"pid"`
+	PPID         uint32                       `json:"ppid"`
+	ChildPID     uint32                       `json:"child_pid"`
+	Comm         string                       `json:"comm"`
+	Filename     string                       `json:"filename"`
+	Path         string                       `json:"path"`
+	Daddr        string                       `json:"daddr"`
+	Dport        uint16                       `json:"dport"`
+	Protocol     uint8                        `json:"protocol"`
+	DNS          bool                         `json:"dns"`
+	Duration     *uint64                      `json:"duration_ms"`
+	ExitCode     int32                        `json:"exit_code"`
+	Reason       string                       `json:"reason"`
+	StillRunning []uint32                     `json:"still_running"`
+	Counts       map[string]uint64            `json:"counts"`
+	PerProcess   map[string]map[string]uint64 `json:"per_process_counts"`
+	IntervalMS   *int64                       `json:"interval_ms"`
 }
 
 func readEvents(path string) []capturedEvent {

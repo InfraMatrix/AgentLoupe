@@ -179,8 +179,28 @@ The existing stderr syscall dump (on `--stats-interval`) is unchanged.
 Example:
 
 ```json
-{"ts":"2026-10-29T18:31:26.381185284Z","type":"syscall_summary","session_id":690100720757637100,"parent_session_id":0,"agent_name":"claude-code","pid":0,"pid_in_ns":0,"ppid":0,"uid":0,"comm":"","interval_ms":1000,"counts":{"read":812,"write":97,"openat":45}}
+{"ts":"2026-10-30T16:05:36.915939035Z","type":"syscall_summary","session_id":14067088359163953153,"parent_session_id":0,"agent_name":"claude-code","pid":0,"pid_in_ns":0,"ppid":0,"uid":0,"comm":"","interval_ms":1010,"counts":{"close":1,"epoll_pwait2":5,"fstat":1,"futex":175,"madvise":10,"openat":1,"read":2,"statx":5,"write":2},"per_process_counts":{"5124":{"close":1,"epoll_pwait2":5,"fstat":1,"futex":175,"madvise":10,"openat":1,"read":2,"statx":5,"write":2}}}
 ```
+
+### Session lifecycle: `root_exit` and orphans
+
+A session is a process tree, not just its root process. When the
+agent's root process exits, the loader emits a `root_exit` event
+(same identity fields as the root's `exit` event, plus `exit_code`)
+and the session stays open while any tracked child processes remain
+alive; their file/network/syscall activity keeps being attributed to
+the session, and the final `syscall_summary` flush still precedes the
+closing `session_end`. `session_end` carries a `reason`:
+
+| `reason` | Meaning |
+|---|---|
+| `all_exited` | The root and every tracked process in the session have exited. |
+| `orphan_timeout` | Tracked processes were still alive when `--orphan-timeout` expired after the root exit. The event lists their TGIDs in `still_running`; later events from them are dropped as stragglers, and the session does not reopen. |
+
+`--orphan-timeout` (default `3m`, `0` = wait indefinitely) bounds how
+long a session may outlive its root. `loupe-timeline` and
+`loupe-scorecard` report the gap between `root_exit` and `session_end`
+(the orphan window), the end reason, and any still-running TGIDs.
 
 Useful loader flags: `--drop-path-prefix /proc/` (repeatable) suppresses
 file-event noise (e.g. agents polling their own `/proc/<pid>/stat`);
@@ -229,6 +249,7 @@ Three layers, deliberately kept separate:
 |---|---|---|
 | Ubuntu, kernel 7.0.0-42-generic, Go 1.26.8, clang 21.1.8, kernel BTF present, `bpf` in `/sys/kernel/security/lsm` | LSM, full requested probe set | `make test` pass, `sudo make integration` **PASS**, 2026-10-28 |
 | Same host | LSM, `--catalog-only claude-code` under plain `sudo` | Catalog resolved the per-user install (`SUDO_USER` home), adopted 1 already-running Claude Code process tree, 29,035 events in 87s with zero ring-buffer drops / lost counters, reduced with `loupe-scorecard`, 2026-10-29 |
+| Same host | LSM, `--config configs/loupe-demo.yaml --enable-syscall-summary` | Adopted an already-running Claude Code tree (child `gh` attributed per-program) alongside 2× `loupe_demo.py` sessions; 392 events / 75 syscall_summary in 120s, zero ring-buffer drops or lost counters; `root_exit` + `session_end` (`all_exited`) verified live; reduced with loupe-scorecard and loupe-timeline (text + HTML), 2026-10-30 |
 
 Not yet tested on a live kernel:
 
