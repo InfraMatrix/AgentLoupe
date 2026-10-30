@@ -40,6 +40,26 @@ func possibleCPUs() int {
 	return n
 }
 
+// No-session warning thresholds: if agent rules are configured but no
+// session_start has been emitted after the grace period, matching is
+// probably failing silently (wrong exec_path, agent not running, …).
+// Warn once after the grace period, then at most once a minute until
+// the first session appears.
+const (
+	noSessionGrace  = 30 * time.Second
+	noSessionRepeat = time.Minute
+)
+
+func noSessionDue(start, lastWarn, now time.Time, seen uint64, rules int) bool {
+	if seen > 0 || rules <= 0 {
+		return false
+	}
+	if now.Sub(start) < noSessionGrace {
+		return false
+	}
+	return lastWarn.IsZero() || now.Sub(lastWarn) >= noSessionRepeat
+}
+
 func maintenance(ctx context.Context, l *Loader, proc *Processor, o Options, logf func(string, ...any), summarizer *SyscallSummarizer) {
 	tick := time.Second
 	if summarizer != nil && o.SyscallInterval > 0 && o.SyscallInterval < tick {
@@ -47,7 +67,8 @@ func maintenance(ctx context.Context, l *Loader, proc *Processor, o Options, log
 	}
 	ticker := time.NewTicker(tick)
 	defer ticker.Stop()
-	var lastStats, lastSweep, lastFlush, lastAdopt time.Time
+	start := time.Now()
+	var lastStats, lastSweep, lastFlush, lastAdopt, lastNoSessionWarn time.Time
 	lastSyscall := time.Now()
 	for {
 		select {
@@ -64,6 +85,15 @@ func maintenance(ctx context.Context, l *Loader, proc *Processor, o Options, log
 			proc.Expire()
 			proc.ExpireOrphans()
 			l.sampleTrackedCPU()
+			rules := 0
+			if cfg := l.Rules(); cfg != nil {
+				rules = len(cfg.Agents)
+			}
+			if noSessionDue(start, lastNoSessionWarn, now, proc.SessionsSeen(), rules) {
+				lastNoSessionWarn = now
+				logf("warn: no agent sessions seen after %s although %d agent rule(s) are configured — nothing has matched yet. Check that exec_path rules name the real binary (symlinks are resolved; match is by dev+inode), that interpreter argv_contains rules match the agent's command line, and that the agent is actually running (adoption rescans every 5s; --catalog or --attach-pid sidestep config matching)",
+					now.Sub(start).Round(time.Second), rules)
+			}
 			if now.Sub(lastAdopt) >= 5*time.Second {
 				lastAdopt = now
 				if cfg := l.Rules(); cfg != nil {

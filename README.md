@@ -87,6 +87,24 @@ Opt-in probes (off by default):
                            # --syscall-interval, as syscall_summary JSONL events
 ```
 
+### Try the demo (one command)
+
+```sh
+make demo          # or: bash scripts/demo.sh
+```
+
+The script checks prerequisites (Linux ≥ 5.8, kernel BTF, toolchain,
+sudo), builds everything as your user, then runs the loader for 45s
+against `configs/loupe-demo.yaml` (a `loupe_demo.py` python workload
+plus a Claude Code rule), runs the demo workload twice, and renders
+the scorecard, the text timeline, and `timeline-demo.html`. It prompts
+for sudo once; only the loader run is privileged. If a Claude Code
+session is already running on the host it is adopted automatically and
+appears in the capture alongside the demo sessions. Outputs:
+`demo-capture.jsonl` (raw events), `demo-loader.log` (feature probe +
+drop counters), `demo-timeline.txt`. Set `FORCE_TP=1` to rehearse the
+tracepoint-fallback probe set on an LSM host (see Troubleshooting).
+
 ### Attaching to already-running agents
 
 ```sh
@@ -209,7 +227,44 @@ process CPU, sampled from `/proc`). Network events cover TCP and UDP;
 connects to port 53 are flagged `"dns": true` (no payload parsing).
 Paths/argv are captured up to 512 bytes (ABI v3); `comm` remains capped
 at 16 chars by the kernel (`TASK_COMM_LEN`) — use exec `filename`/`argv`
-to disambiguate.
+to disambiguate. `--force-tracepoint-mode` forces the tracepoint
+fallback probe set even when BPF LSM is available, so the fallback
+path can be rehearsed on any host.
+
+### Troubleshooting
+
+**Empty capture / no sessions.** Matching failures are silent by
+design in the kernel (untracked processes are ignored), so the loader
+helps from userspace: if agent rules are configured but no
+`session_start` has been emitted after 30s, it logs a `warn: no agent
+sessions seen …` line (repeated at most once a minute) instead of
+leaving you with an empty file. Usual causes, in order:
+
+1. The agent isn't running yet, or exited before the 5s adoption
+   rescan. Start the agent, wait a few seconds, check again.
+2. `exec_path` names a symlink or wrapper: the path is resolved and
+   matching is by `(dev, inode)` of the binary actually exec'd, so
+   point the rule at the real binary (e.g. Claude Code's
+   `~/.local/share/claude/versions/<version>`), not a launcher script.
+3. An interpreter rule's `argv_contains` doesn't appear in the
+   agent's command line (check `/proc/<pid>/cmdline`).
+4. The agent runs under a different user/install than the rule
+   assumes — prefer `--catalog` (built-in rules) or `--attach-pid`
+   to sidestep config matching while diagnosing.
+
+Also check the startup log: the feature probe prints the kernel,
+whether `bpf` is in `/sys/kernel/security/lsm`, the binary-identity
+self-test result, and exactly which hooks attached. Zero
+`ringbuf_drops` and zero map-full counters in the periodic `stats:`
+lines mean nothing was lost; nonzero values mean the capture is
+incomplete, not just quiet.
+
+**Exercising the fallback.** On a host without `bpf` in `lsm=` the
+loader selects tracepoint mode automatically. To rehearse that path
+on an LSM host: `make demo FORCE_TP=1`, or run the loader with
+`--force-tracepoint-mode`. Expect `handle_exec_tp` /
+`handle_file_sys_enter` / `handle_file_sys_exit` in the attached-hook
+list and the "fallbacks active" line in the log.
 
 Verify nothing is left behind after exit (dev-mode guarantee):
 
@@ -250,11 +305,17 @@ Three layers, deliberately kept separate:
 | Ubuntu, kernel 7.0.0-42-generic, Go 1.26.8, clang 21.1.8, kernel BTF present, `bpf` in `/sys/kernel/security/lsm` | LSM, full requested probe set | `make test` pass, `sudo make integration` **PASS**, 2026-10-28 |
 | Same host | LSM, `--catalog-only claude-code` under plain `sudo` | Catalog resolved the per-user install (`SUDO_USER` home), adopted 1 already-running Claude Code process tree, 29,035 events in 87s with zero ring-buffer drops / lost counters, reduced with `loupe-scorecard`, 2026-10-29 |
 | Same host | LSM, `--config configs/loupe-demo.yaml --enable-syscall-summary` | Adopted an already-running Claude Code tree (child `gh` attributed per-program) alongside 2× `loupe_demo.py` sessions; 392 events / 75 syscall_summary in 120s, zero ring-buffer drops or lost counters; `root_exit` + `session_end` (`all_exited`) verified live; reduced with loupe-scorecard and loupe-timeline (text + HTML), 2026-10-30 |
+| Same host | Tracepoint fallback, `--force-tracepoint-mode` (`FORCE_TP=1 make demo`) | Fallback probe set (`handle_exec_tp`, `handle_file_sys_enter/exit`) loaded and attached; adopted Claude Code tree plus 2× `loupe_demo.py` sessions with correct file/net attribution at raw-arg path fidelity, zero ring-buffer drops; `root_exit` + `session_end` (`all_exited`) verified, 2026-10-30 |
 
 Not yet tested on a live kernel:
 
-- **Tracepoint fallback mode** (no `bpf` in `lsm=`). The loader selects
-  it automatically; it has never been loaded live — treat as unverified.
+- **Tracepoint fallback on a host without `bpf` in `lsm=`** (automatic
+  selection). The identical probe set was loaded and run via
+  `--force-tracepoint-mode` on the host above (see "Tested on"), but
+  automatic selection on a genuinely LSM-less host has not been
+  exercised. Expect lower path fidelity in this mode: file paths come
+  from raw syscall arguments (relative paths stay relative) and the
+  dentry walk may miss mount prefixes.
 - **Opt-in probe sets** (`--enable-file-mutations`,
   `--enable-io-accounting`). Not attached in the tested configuration.
   (`--enable-syscall-summary` is enabled by the integration test and
@@ -290,5 +351,5 @@ cmd/loupe-timeline/  per-session timeline + breakdown (text / JSON / HTML)
 internal/app/   loader: feature probe, attach, maps, events, housekeeping
 internal/config/ agents.yaml parsing
 configs/        example configuration
-scripts/        build-time safety checks
+scripts/        build-time safety checks, one-command demo (demo.sh)
 ```

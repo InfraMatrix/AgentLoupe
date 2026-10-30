@@ -5,6 +5,10 @@
 #   make bpf          Compile bpf/agentloupe.bpf.c -> bpf/agentloupe.bpf.o (CO-RE).
 #   make test         Unit tests only: no kernel, no root (go test ./...).
 #   make integration  Real-kernel integration test. Run as: sudo make integration
+#   make demo         One-command live demo (scripts/demo.sh): builds, runs
+#                     the loader with configs/loupe-demo.yaml, runs the demo
+#                     workload, renders scorecard/timeline/HTML. Prompts for
+#                     sudo once.
 #
 # Supporting targets:
 #   make check        Header ABI asserts + LSM return-0 safety checks.
@@ -49,6 +53,10 @@ integration:
 .PHONY: vet
 vet:
 	$(GO) vet ./...
+
+.PHONY: demo
+demo:
+	bash scripts/demo.sh
 
 .PHONY: clean
 clean:

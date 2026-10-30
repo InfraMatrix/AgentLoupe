@@ -260,8 +260,11 @@ struct syscall_key {
  * CPU; BPF programs run non-preemptibly per invocation, and the walk
  * completes within one invocation, so no locking is needed. */
 struct path_scratch {
-	char buf[MAX_PATH_LEN];           /* assembled path (built backwards) */
-	char comp[DENTRY_WALK_MAX_NAME];  /* one component being copied       */
+	char buf[MAX_PATH_LEN];           /* assembled path / caller output buffer */
+	/* Component slots for path_via_walk, in upward-walk order (slot 0 =
+	 * basename). Kept separate from buf so buf can serve as the walk's
+	 * output without aliasing the staged components. */
+	char names[DENTRY_WALK_MAX_DEPTH * DENTRY_WALK_MAX_NAME];
 };
 
 /* Pending syscall-fallback file operation, keyed by full pid_tgid

@@ -285,10 +285,12 @@ type Processor struct {
 	live     map[uint64]*liveSession
 	decided  map[uint64]bool // session -> confirmed(true)/rejected(false)
 	started  map[uint64]bool
-	// startedMu guards only `started`, separately from mu: the syscall
-	// summarizer checks HasStarted while holding its own lock and runs
-	// under mu via BeforeSessionEnd, so HasStarted must not take mu.
+	// startedMu guards only `started` (and seenCount), separately from
+	// mu: the syscall summarizer checks HasStarted while holding its
+	// own lock and runs under mu via BeforeSessionEnd, so HasStarted
+	// must not take mu.
 	startedMu       sync.RWMutex
+	seenCount       uint64 // sessions that have ever emitted session_start
 	droppedBuf      int
 	DropPrefixes    []string // file paths with any of these prefixes are dropped
 	droppedFiltered int
@@ -376,8 +378,21 @@ func (p *Processor) markStarted(sid uint64) bool {
 	p.startedMu.Lock()
 	defer p.startedMu.Unlock()
 	was := p.started[sid]
+	if !was {
+		p.seenCount++
+	}
 	p.started[sid] = true
 	return was
+}
+
+// SessionsSeen reports how many distinct sessions have ever emitted
+// session_start (including ones that have since ended). Used by the
+// maintenance loop to warn when rules are configured but nothing has
+// matched — the otherwise-silent "no sessions" failure.
+func (p *Processor) SessionsSeen() uint64 {
+	p.startedMu.RLock()
+	defer p.startedMu.RUnlock()
+	return p.seenCount
 }
 
 func (p *Processor) markEnded(sid uint64) {
