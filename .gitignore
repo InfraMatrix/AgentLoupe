@@ -11,12 +11,14 @@
 /bpf/*.ll
 
 # Local run output: JSONL event streams, loader logs, scratch configs.
+# Any capture/report produced at the repo root is ignored, whatever
+# the run was named — captures contain home paths and argv and must
+# never be committed (make check enforces this for tracked files).
 /tmp/
 /*.jsonl
-/demo-loader.log
-/demo-timeline.txt
-/timeline-demo.html
-/timeline-live.html
+/timeline-*.html
+/*-loader.log
+/*-timeline.txt
 
 # Go test / coverage artifacts produced at the repo root
 /coverage.out

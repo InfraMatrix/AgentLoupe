@@ -1,19 +1,19 @@
-# Demo config — created because the run referenced this path but it did
-# not exist, so AgentLoupe ran with an empty scope and dropped everything.
+# Demo config for scripts/demo.sh (`make demo`).
+#
+# Only the deterministic demo workload lives here. Claude Code is NOT
+# listed: it is per-user (its binary lives under the invoking user's
+# home), so hardcoding any one user's path would break the demo on
+# every other machine. scripts/demo.sh instead passes
+# `--catalog-only claude-code` to the loader — the built-in catalog
+# resolves the SUDO_USER's home, and silently skips the entry when no
+# Claude Code install exists on the host.
 agents:
   # Reliable demo: any `python3 ...loupe_demo...` process is confirmed
   # from argv (kernel matches the interpreter inode, userspace confirms
-  # the marker, children inherit the session).
+  # the marker, children inherit the session). The workload itself is
+  # tracked in the repo at examples/loupe_demo.py.
   - name: loupe-demo-python
     kind: tool
     match:
       interpreter: /usr/bin/python3
       argv_contains: loupe_demo
-
-  # Claude Code itself, matched by binary inode. Note: if this path is a
-  # wrapper/script, the exec'd inode will be the real interpreter/binary,
-  # not this path — the python rule above is the guaranteed demo.
-  - name: claude-code
-    kind: tool
-    match:
-      exec_path: /home/leonematt/.local/bin/claude
