@@ -2,11 +2,13 @@
 # AgentLoupe one-command demo.
 #
 # Builds everything, checks prerequisites, runs the loader against
-# configs/loupe-demo.yaml (Claude Code + the loupe_demo python workload),
-# runs the demo workload twice, then renders the scorecard, the text
-# timeline, and an HTML timeline. If a Claude Code session is already
-# running on this host it is adopted automatically and shows up in the
-# capture too.
+# configs/loupe-demo.yaml (the loupe_demo python workload, tracked at
+# examples/loupe_demo.py) plus `--catalog-only claude-code`, runs the
+# demo workload twice, then renders the scorecard, the text timeline,
+# and an HTML timeline. The catalog rule is a no-op on hosts without
+# Claude Code installed; if a Claude Code session is already running
+# on this host it is adopted automatically and shows up in the capture
+# too.
 #
 # Needs: Linux kernel >= 5.8 (5.11+ for LSM mode), kernel BTF, go,
 # clang, python3, sudo (you will be prompted once). Nothing is pinned;
@@ -22,6 +24,8 @@ LOADER_LOG="${LOADER_LOG:-demo-loader.log}"
 TIMELINE_TXT="${TIMELINE_TXT:-demo-timeline.txt}"
 TIMELINE_HTML="${TIMELINE_HTML:-timeline-demo.html}"
 MAX_RUNTIME="${MAX_RUNTIME:-45s}"
+DEMO_WORKLOAD="examples/loupe_demo.py"
+DEMO_CONFIG="configs/loupe-demo.yaml"
 
 say()  { printf '\n== %s ==\n' "$*"; }
 info() { printf 'demo: %s\n' "$*"; }
@@ -33,6 +37,10 @@ say "Checking prerequisites"
 for tool in go clang python3 sudo; do
   command -v "$tool" >/dev/null 2>&1 || die "missing tool: $tool (see README 'Required toolchain')"
 done
+# The workload and config are tracked in the repo; fail fast (before
+# building or prompting for sudo) if this is not a complete checkout.
+[ -f "$DEMO_WORKLOAD" ] || die "demo workload $DEMO_WORKLOAD is missing — it is tracked in the repo, so your checkout is incomplete (try: git checkout -- $DEMO_WORKLOAD)"
+[ -f "$DEMO_CONFIG" ] || die "demo config $DEMO_CONFIG is missing — it is tracked in the repo, so your checkout is incomplete (try: git checkout -- $DEMO_CONFIG)"
 
 kver="$(uname -r)"
 kmaj="${kver%%.*}"; krest="${kver#*.}"; kmin="${krest%%.*}"
@@ -68,8 +76,13 @@ FORCE_FLAG=()
 if [ "${FORCE_TP:-0}" = "1" ]; then
   FORCE_FLAG=(--force-tracepoint-mode)
 fi
+# --catalog-only claude-code: the built-in catalog resolves the
+# invoking (SUDO_USER) user's per-user install and silently skips the
+# rule when Claude Code is not installed, so this works on any host.
+# The demo config itself only carries the loupe_demo workload rule.
 sudo ./agentloupe \
-  --config configs/loupe-demo.yaml \
+  --config "$DEMO_CONFIG" \
+  --catalog-only claude-code \
   --bpf-object bpf/agentloupe.bpf.o \
   --enable-syscall-summary \
   --output "$CAPTURE" \
@@ -96,8 +109,8 @@ fi
 
 # --------------------------------------------------------------- workload
 say "Running demo workload twice"
-python3 tmp/loupe_demo.py
-python3 tmp/loupe_demo.py
+python3 "$DEMO_WORKLOAD"
+python3 "$DEMO_WORKLOAD"
 
 say "Waiting for the loader window to close"
 wait "$LOADER_PID" 2>/dev/null || true

@@ -95,8 +95,10 @@ make demo          # or: bash scripts/demo.sh
 
 The script checks prerequisites (Linux ≥ 5.8, kernel BTF, toolchain,
 sudo), builds everything as your user, then runs the loader for 45s
-against `configs/loupe-demo.yaml` (a `loupe_demo.py` python workload
-plus a Claude Code rule), runs the demo workload twice, and renders
+against `configs/loupe-demo.yaml` (the `examples/loupe_demo.py` python
+workload) plus `--catalog-only claude-code` (the built-in catalog
+resolves your per-user install and is skipped entirely on hosts
+without Claude Code), runs the demo workload twice, and renders
 the scorecard, the text timeline, and `timeline-demo.html`. It prompts
 for sudo once; only the loader run is privileged. If a Claude Code
 session is already running on the host it is adopted automatically and

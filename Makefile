@@ -11,7 +11,8 @@
 #                     sudo once.
 #
 # Supporting targets:
-#   make check        Header ABI asserts + LSM return-0 safety checks.
+#   make check        Header ABI asserts + LSM return-0 safety checks +
+#                     tracked-files hygiene (no home paths / captures).
 #   make vmlinux.h    Regenerate bpf/vmlinux.h from the RUNNING kernel's BTF.
 #                     Run this on the target kernel, not blindly on a dev host.
 #   make vet          go vet ./...
@@ -97,8 +98,12 @@ check-lsm-returns-selftest:
 	python3 scripts/check_lsm_returns.py bpf/agentloupe.bpf.c
 	@echo "check-lsm-returns-selftest: OK"
 
+.PHONY: check-tracked-files
+check-tracked-files:
+	python3 scripts/check_tracked_files.py
+
 .PHONY: check
-check: check-header check-lsm-returns check-lsm-returns-selftest
+check: check-header check-lsm-returns check-lsm-returns-selftest check-tracked-files
 
 .PHONY: vmlinux.h
 vmlinux.h:

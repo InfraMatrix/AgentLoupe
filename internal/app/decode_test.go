@@ -45,7 +45,7 @@ func buildRecord(typ uint16, flags uint16, payload []byte) []byte {
 func execPayload() []byte {
 	p := make([]byte, 1560)
 	putStr(p[0:512], "/usr/bin/python3")
-	putStr(p[512:1024], "/home/user/proj")
+	putStr(p[512:1024], "/work/user/proj")
 	putStr(p[1024:1536], "python3\x00-m\x00aider\x00")
 	// p[1536:1540] argc is left 0 by the kernel; the decoder counts argv.
 	binary.LittleEndian.PutUint32(p[1540:1544], 1000) // audit_loginuid
@@ -130,7 +130,7 @@ func TestDecodeValidEvents(t *testing.T) {
 			raw:  buildRecord(1, 0, execPayload()),
 			check: func(t *testing.T, d *Decoded) {
 				assertField(t, d, "filename", "/usr/bin/python3")
-				assertField(t, d, "cwd", "/home/user/proj")
+				assertField(t, d, "cwd", "/work/user/proj")
 				assertField(t, d, "argv", []string{"python3", "-m", "aider"})
 				assertField(t, d, "argc", 3)
 				assertField(t, d, "loginuid", uint32(1000))
