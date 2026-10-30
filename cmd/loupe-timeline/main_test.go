@@ -74,6 +74,20 @@ func TestBuildTimelineBasic(t *testing.T) {
 	if py.Depth != 1 {
 		t.Errorf("python depth = %d", py.Depth)
 	}
+	// Per-process CPU / peak RSS come from the exit events (ABI v4).
+	if echo.CPUUserMS != 1 || echo.CPUSysMS != 1 || echo.MaxRSSKB != 2048 {
+		t.Errorf("echo resources = cpu_user %dms cpu_sys %dms max_rss %dKiB, want 1/1/2048",
+			echo.CPUUserMS, echo.CPUSysMS, echo.MaxRSSKB)
+	}
+	var root100 *Process
+	for _, p := range s100.Processes {
+		if p.PID == 1000 {
+			root100 = p
+		}
+	}
+	if root100 == nil || root100.CPUUserMS != 120 || root100.CPUSysMS != 30 || root100.MaxRSSKB != 51200 {
+		t.Errorf("root resources = %+v, want cpu_user 120ms cpu_sys 30ms max_rss 51200KiB", root100)
+	}
 	// Open-ended: session 200 never exits, extends to capture end (4000ms).
 	if !py.OpenEnded || py.EndMs != 4000 {
 		t.Errorf("python open-ended = %v end_ms=%d", py.OpenEnded, py.EndMs)
@@ -341,6 +355,17 @@ func TestBuildTimelineOrphan(t *testing.T) {
 			t.Errorf("s500 process %s unexpectedly open-ended", p.Label)
 		}
 	}
+	// Exit/root_exit resource fields (ABI v4) land on the right processes.
+	resByPID := map[uint32]*Process{}
+	for _, p := range s500.Processes {
+		resByPID[p.PID] = p
+	}
+	if p := resByPID[5000]; p == nil || p.CPUUserMS != 200 || p.CPUSysMS != 50 || p.MaxRSSKB != 65536 {
+		t.Errorf("s500 root resources = %+v, want 200/50/65536", p)
+	}
+	if p := resByPID[5001]; p == nil || p.CPUUserMS != 1 || p.CPUSysMS != 1 || p.MaxRSSKB != 2048 {
+		t.Errorf("s500 orphan resources = %+v, want 1/1/2048", p)
+	}
 
 	// Session 600: the orphan outlives the orphan timeout: reason
 	// orphan_timeout, still_running lists the surviving TGID, gap 2.5s.
@@ -437,7 +462,8 @@ func TestWriteText(t *testing.T) {
 	writeText(&sb, rep)
 	out := sb.String()
 	for _, want := range []string{"session 100", "process tree:", "echo", "still running at capture end", "read",
-		"syscall categories", "notable syscalls", "syscalls by program", "first-seen syscalls"} {
+		"syscall categories", "notable syscalls", "syscalls by program", "first-seen syscalls",
+		"cpu_user=120ms cpu_sys=30ms max_rss=51200KiB"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("text output missing %q:\n%s", want, out)
 		}

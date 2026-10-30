@@ -62,8 +62,11 @@ type evForkMirror struct {
 }
 
 type evExitMirror struct {
-	ExitCode int32
-	Pad      int32
+	ExitCode  int32
+	Pad       int32
+	CPUUserNS uint64
+	CPUSysNS  uint64
+	MaxRSSKB  uint64
 }
 
 type evFileOpenMirror struct {
@@ -282,6 +285,10 @@ func TestStructOffsetsMatchDecoder(t *testing.T) {
 		{"ev_exec.audit_loginuid (p[1540:1544])", unsafe.Offsetof(evExecMirror{}.AuditLoginUID), 1540},
 		{"ev_exec.filename_src (p[1552])", unsafe.Offsetof(evExecMirror{}.FilenameSrc), 1552},
 		{"ev_exec.cwd_src (p[1553])", unsafe.Offsetof(evExecMirror{}.CwdSrc), 1553},
+		{"ev_exit.exit_code (p[0:4])", unsafe.Offsetof(evExitMirror{}.ExitCode), 0},
+		{"ev_exit.cpu_user_ns (p[8:16])", unsafe.Offsetof(evExitMirror{}.CPUUserNS), 8},
+		{"ev_exit.cpu_sys_ns (p[16:24])", unsafe.Offsetof(evExitMirror{}.CPUSysNS), 16},
+		{"ev_exit.max_rss_kb (p[24:32])", unsafe.Offsetof(evExitMirror{}.MaxRSSKB), 24},
 		{"ev_file_open.file_ptr (p[512:520])", unsafe.Offsetof(evFileOpenMirror{}.FilePtr), 512},
 		{"ev_file_open.flags (p[520:524])", unsafe.Offsetof(evFileOpenMirror{}.Flags), 520},
 		{"ev_file_open.result (p[524:528])", unsafe.Offsetof(evFileOpenMirror{}.Result), 524},
@@ -354,9 +361,9 @@ func TestABIVersionMatchesHeader(t *testing.T) {
 	if m == nil {
 		t.Fatal("AGENTLOUPE_ABI_VERSION not found in bpf/agentloupe.h")
 	}
-	// Decode rejects anything but version 3 (see TestDecodeMalformed);
+	// Decode rejects anything but version 4 (see TestDecodeMalformed);
 	// if the header bumps the version, the decoder must move with it.
-	if string(m[1]) != "3" {
-		t.Errorf("AGENTLOUPE_ABI_VERSION = %s, but the Go decoder only accepts 3", m[1])
+	if string(m[1]) != "4" {
+		t.Errorf("AGENTLOUPE_ABI_VERSION = %s, but the Go decoder only accepts 4", m[1])
 	}
 }

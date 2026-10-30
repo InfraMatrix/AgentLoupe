@@ -17,7 +17,7 @@ import (
 // Layout mirrors bpf/agentloupe.h exactly (see abi_layout_test.go, which
 // fails if these sizes/offsets drift from the C structs):
 //   event_hdr 72 B, then one fixed-size payload per type.
-//   ev_exec 1560, ev_fork 8, ev_exit 8, ev_file_open 536, ev_file_unlink 520,
+//   ev_exec 1560, ev_fork 8, ev_exit 32, ev_file_open 536, ev_file_unlink 520,
 //   ev_file_rename 1032, ev_file_chmod 528, ev_file_close 552, ev_net_connect 48.
 
 func putStr(dst []byte, s string) { copy(dst, s) }
@@ -27,7 +27,7 @@ func buildRecord(typ uint16, flags uint16, payload []byte) []byte {
 	raw := make([]byte, 72+len(payload))
 	binary.LittleEndian.PutUint16(raw[0:2], typ)
 	binary.LittleEndian.PutUint16(raw[2:4], uint16(len(raw))) // hdr.size
-	binary.LittleEndian.PutUint16(raw[4:6], 3)                // ABI version
+	binary.LittleEndian.PutUint16(raw[4:6], 4)                // ABI version
 	binary.LittleEndian.PutUint16(raw[6:8], flags)
 	binary.LittleEndian.PutUint64(raw[8:16], 123456789) // ts_ns
 	binary.LittleEndian.PutUint64(raw[16:24], 42)       // session_id
@@ -177,12 +177,18 @@ func TestDecodeValidEvents(t *testing.T) {
 		{
 			name: "exit",
 			raw: func() []byte {
-				p := make([]byte, 8)
-				binary.LittleEndian.PutUint32(p[0:4], 0x100) // raw wait status for exit(1)
+				p := make([]byte, 32)
+				binary.LittleEndian.PutUint32(p[0:4], 0x100)           // raw wait status for exit(1)
+				binary.LittleEndian.PutUint64(p[8:16], 12_500_000)     // cpu_user_ns -> 12 ms (floor)
+				binary.LittleEndian.PutUint64(p[16:24], 3_000_000)     // cpu_sys_ns -> 3 ms
+				binary.LittleEndian.PutUint64(p[24:32], 45678)         // max_rss_kb, KiB as-is
 				return buildRecord(3, 0, p)
 			}(),
 			check: func(t *testing.T, d *Decoded) {
 				assertField(t, d, "exit_code", int32(0x100))
+				assertField(t, d, "cpu_user_ms", uint64(12))
+				assertField(t, d, "cpu_sys_ms", uint64(3))
+				assertField(t, d, "max_rss_kb", uint64(45678))
 			},
 		},
 		{
@@ -446,7 +452,8 @@ func TestDecodeMalformed(t *testing.T) {
 		{"71 bytes (header truncated)", make([]byte, 71), "short record"},
 		{"bad abi version 0", withVersion(buildRecord(2, 0, make([]byte, 8)), 0), "abi version 0"},
 		{"bad abi version 2", withVersion(buildRecord(2, 0, make([]byte, 8)), 2), "abi version 2"},
-		{"bad abi version 4", withVersion(buildRecord(2, 0, make([]byte, 8)), 4), "abi version 4"},
+		{"bad abi version 3", withVersion(buildRecord(2, 0, make([]byte, 8)), 3), "abi version 3"},
+		{"bad abi version 5", withVersion(buildRecord(2, 0, make([]byte, 8)), 5), "abi version 5"},
 		{"size below header", withSize(buildRecord(2, 0, make([]byte, 8)), 71), "bad record size 71"},
 		{"size zero", withSize(buildRecord(2, 0, make([]byte, 8)), 0), "bad record size 0"},
 		{"size beyond buffer", withSize(buildRecord(2, 0, make([]byte, 8)), 999), "bad record size 999"},
@@ -532,7 +539,7 @@ func TestProcessorJSONPipeline(t *testing.T) {
 
 	// Exit of the session root synthesises root_exit, then session_end
 	// (no tracked processes remain in this session).
-	exit, err := Decode(buildRecord(3, 0, make([]byte, 8)))
+	exit, err := Decode(buildRecord(3, 0, make([]byte, 32))) // ev_exit (ABI v4)
 	if err != nil {
 		t.Fatal(err)
 	}

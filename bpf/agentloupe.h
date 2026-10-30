@@ -56,7 +56,7 @@
 #ifndef AGENTLOUPE_H
 #define AGENTLOUPE_H
 
-#define AGENTLOUPE_ABI_VERSION 3
+#define AGENTLOUPE_ABI_VERSION 4
 
 /* Minimum kernel for full (LSM) mode; the loader enforces this, the
  * header only documents it. Fallback floor is 5.8. */
@@ -247,8 +247,8 @@ struct fd_info {
 };                                        /* 568 bytes                         */
 
 /* Syscall summary (optional probe): counts only, never events. The tgid
- * is in the key (ABI v3) so counts attribute to the process that made
- * them, not just the session. */
+ * is in the key (added in ABI v3, unchanged since) so counts attribute
+ * to the process that made them, not just the session. */
 struct syscall_key {
 	__u64 session_id;
 	__u32 tgid;
@@ -386,10 +386,21 @@ struct ev_fork {
 	__u32 child_pid;                  /* child's PID in its PID namespace  */
 };                                        /* 8 bytes                           */
 
+/*
+ * Exit-time resource usage for the exiting thread group ("self": the
+ * group's own threads, never its reaped children — see handle_exit in
+ * agentloupe.bpf.c for which kernel fields these come from and why).
+ * cpu_*_ns are thread-group CPU totals in nanoseconds; max_rss_kb is
+ * the group's peak resident set size in KiB (the kernel's ru_maxrss
+ * unit). Userspace converts the CPU fields to cpu_user_ms/cpu_sys_ms.
+ */
 struct ev_exit {
 	__s32 exit_code;                  /* raw exit status; decoded in Go    */
-	__s32 _pad;
-};                                        /* 8 bytes                           */
+	__s32 _pad;                       /* keep the __u64 fields 8-aligned   */
+	__u64 cpu_user_ns;                /* thread-group user CPU, ns         */
+	__u64 cpu_sys_ns;                 /* thread-group system CPU, ns       */
+	__u64 max_rss_kb;                 /* peak RSS of the thread group, KiB */
+};                                        /* 32 bytes                          */
 
 /* file_ptr is the struct file * as an opaque correlation cookie. It is
  * meaningful only within one boot and one loader run; userspace must not
@@ -469,6 +480,7 @@ struct ev_net_connect {
  * them with a host compiler, no kernel or libbpf needed. */
 _Static_assert(sizeof(struct event_hdr) == 72, "event_hdr ABI changed");
 _Static_assert(sizeof(struct ev_exec) == 1560, "ev_exec ABI changed");
+_Static_assert(sizeof(struct ev_exit) == 32, "ev_exit ABI changed");
 _Static_assert(sizeof(struct ev_file_open) == 536, "ev_file_open ABI changed");
 _Static_assert(sizeof(struct ev_file_chmod) == 528, "ev_file_chmod ABI changed");
 _Static_assert(sizeof(struct ev_file_close) == 552, "ev_file_close ABI changed");

@@ -83,8 +83,8 @@ func Decode(raw []byte) (*Decoded, error) {
 	}
 	size := int(binary.LittleEndian.Uint16(raw[2:4]))
 	version := binary.LittleEndian.Uint16(raw[4:6])
-	if version != 3 {
-		return nil, fmt.Errorf("abi version %d, want 3", version)
+	if version != 4 {
+		return nil, fmt.Errorf("abi version %d, want 4", version)
 	}
 	if size < 72 || size > len(raw) {
 		return nil, fmt.Errorf("bad record size %d (have %d)", size, len(raw))
@@ -120,11 +120,16 @@ func Decode(raw []byte) (*Decoded, error) {
 		}
 		d.Fields["child_pid"] = binary.LittleEndian.Uint32(p[0:4]) // host TGID
 		d.Fields["child_pid_in_ns"] = binary.LittleEndian.Uint32(p[4:8])
-	case 3: // exit
-		if !need(8) {
+	case 3: // exit: exit_code + thread-group CPU (ns) + peak RSS (KiB)
+		if !need(32) {
 			return nil, fmt.Errorf("exit payload short")
 		}
 		d.Fields["exit_code"] = int32(binary.LittleEndian.Uint32(p[0:4]))
+		// Kernel reports nanoseconds; JSONL carries milliseconds
+		// (floor), matching the session_end cpu_*_ms fields.
+		d.Fields["cpu_user_ms"] = binary.LittleEndian.Uint64(p[8:16]) / 1_000_000
+		d.Fields["cpu_sys_ms"] = binary.LittleEndian.Uint64(p[16:24]) / 1_000_000
+		d.Fields["max_rss_kb"] = binary.LittleEndian.Uint64(p[24:32])
 	case 4: // file_open
 		if !need(536) {
 			return nil, fmt.Errorf("file_open payload short")
@@ -500,8 +505,12 @@ func (p *Processor) emitLocked(d *Decoded, provisional bool) {
 		rootExit := p.toOutput(d, false)
 		rootExit.Type = "root_exit"
 		rootExit.Fields = map[string]any{}
-		if code, ok := d.Fields["exit_code"]; ok {
-			rootExit.Fields["exit_code"] = code
+		// root_exit mirrors the root's exit event identity: exit code
+		// plus its per-process CPU / peak RSS (ABI v4).
+		for _, k := range []string{"exit_code", "cpu_user_ms", "cpu_sys_ms", "max_rss_kb"} {
+			if v, ok := d.Fields[k]; ok {
+				rootExit.Fields[k] = v
+			}
 		}
 		_ = p.write(rootExit)
 	}
