@@ -32,29 +32,32 @@ const (
 )
 
 type rawEvent struct {
-	Ts         string                       `json:"ts"`
-	Type       string                       `json:"type"`
-	SessionID  uint64                       `json:"session_id"`
-	AgentName  string                       `json:"agent_name"`
-	Comm       string                       `json:"comm"`
-	PID        uint32                       `json:"pid"`
-	PPID       uint32                       `json:"ppid"`
-	Filename   string                       `json:"filename"`
-	Argv       []string                     `json:"argv"`
-	Cwd        string                       `json:"cwd"`
-	Path       string                       `json:"path"`
-	OldPath    string                       `json:"old_path"`
-	NewPath    string                       `json:"new_path"`
-	Mode       string                       `json:"mode"`
-	OpenFlags  uint32                       `json:"open_flags"`
-	ChildPID   uint32                       `json:"child_pid"`
-	Daddr      string                       `json:"daddr"`
-	Dport      uint16                       `json:"dport"`
-	DNS        bool                         `json:"dns"`
-	Protocol   uint8                        `json:"protocol"`
-	Counts     map[string]uint64            `json:"counts"`
-	PerProcess map[string]map[string]uint64 `json:"per_process_counts"`
-	IntervalMS int64                        `json:"interval_ms"`
+	Ts           string                       `json:"ts"`
+	Type         string                       `json:"type"`
+	SessionID    uint64                       `json:"session_id"`
+	AgentName    string                       `json:"agent_name"`
+	Comm         string                       `json:"comm"`
+	PID          uint32                       `json:"pid"`
+	PPID         uint32                       `json:"ppid"`
+	Filename     string                       `json:"filename"`
+	Argv         []string                     `json:"argv"`
+	Cwd          string                       `json:"cwd"`
+	Path         string                       `json:"path"`
+	OldPath      string                       `json:"old_path"`
+	NewPath      string                       `json:"new_path"`
+	Mode         string                       `json:"mode"`
+	OpenFlags    uint32                       `json:"open_flags"`
+	ChildPID     uint32                       `json:"child_pid"`
+	Daddr        string                       `json:"daddr"`
+	Dport        uint16                       `json:"dport"`
+	DNS          bool                         `json:"dns"`
+	Protocol     uint8                        `json:"protocol"`
+	Counts       map[string]uint64            `json:"counts"`
+	PerProcess   map[string]map[string]uint64 `json:"per_process_counts"`
+	IntervalMS   int64                        `json:"interval_ms"`
+	ExitCode     int32                        `json:"exit_code"`
+	Reason       string                       `json:"reason"`
+	StillRunning []uint32                     `json:"still_running"`
 }
 
 type Process struct {
@@ -161,11 +164,18 @@ type SyscallSeries struct {
 }
 
 type SessionReport struct {
-	SessionID         uint64                    `json:"session_id"`
-	Agent             string                    `json:"agent"`
-	RootComm          string                    `json:"root_comm"`
-	Start             string                    `json:"start,omitempty"`
-	End               string                    `json:"end,omitempty"`
+	SessionID        uint64 `json:"session_id"`
+	Agent            string `json:"agent"`
+	RootComm         string `json:"root_comm"`
+	Start            string `json:"start,omitempty"`
+	End              string `json:"end,omitempty"`
+	RootExit         string `json:"root_exit,omitempty"`
+	RootExitMs       int64  `json:"root_exit_ms,omitempty"`
+	SessionEndReason string `json:"session_end_reason,omitempty"`
+	// OrphanGapMs is session_end minus root_exit: how long the
+	// session outlived its root. Set only when both events exist.
+	OrphanGapMs       int64                     `json:"orphan_gap_ms,omitempty"`
+	StillRunning      []uint32                  `json:"still_running,omitempty"`
 	DurationMs        int64                     `json:"duration_ms"`
 	Events            int                       `json:"events"`
 	Processes         []*Process                `json:"processes"`
@@ -208,6 +218,8 @@ type sessionBuilder struct {
 	rep          *SessionReport
 	first        time.Time
 	last         time.Time
+	rootExitT    time.Time
+	sessionEndT  time.Time
 	open         map[uint32]*Process
 	execCount    map[string]int
 	files        map[string]int
@@ -333,6 +345,16 @@ func (b *builder) add(ev *rawEvent) {
 		}
 	}
 	switch ev.Type {
+	case "root_exit":
+		if hasTS && s.rootExitT.IsZero() {
+			s.rootExitT = ts
+		}
+	case "session_end":
+		if hasTS {
+			s.sessionEndT = ts
+		}
+		s.rep.SessionEndReason = ev.Reason
+		s.rep.StillRunning = ev.StillRunning
 	case "session_start":
 		if s.rep.RootComm == "" {
 			s.rep.RootComm = ev.Comm
@@ -536,6 +558,15 @@ func (b *builder) finish() *Report {
 			r.Start = s.first.Format(time.RFC3339Nano)
 			r.End = s.last.Format(time.RFC3339Nano)
 			r.DurationMs = s.last.Sub(s.first).Milliseconds()
+		}
+		if !s.rootExitT.IsZero() {
+			r.RootExit = s.rootExitT.Format(time.RFC3339Nano)
+			if !b.globalFirst.IsZero() {
+				r.RootExitMs = s.rootExitT.Sub(b.globalFirst).Milliseconds()
+			}
+			if !s.sessionEndT.IsZero() {
+				r.OrphanGapMs = s.sessionEndT.Sub(s.rootExitT).Milliseconds()
+			}
 		}
 		// Finalise processes.
 		for _, p := range r.Processes {
@@ -1021,6 +1052,17 @@ func writeText(w io.Writer, rep *Report) {
 	for _, s := range rep.Sessions {
 		fmt.Fprintf(w, "\n== session %d  agent=%s root=%s  %s .. %s (%.1fs, %d events) ==\n",
 			s.SessionID, s.Agent, s.RootComm, s.Start, s.End, float64(s.DurationMs)/1000, s.Events)
+		if s.RootExit != "" {
+			if s.SessionEndReason != "" {
+				fmt.Fprintf(w, "root exit: +%s, orphan gap to session_end: %s (reason %s", fmtDurMs(s.RootExitMs), fmtDurMs(s.OrphanGapMs), s.SessionEndReason)
+				if len(s.StillRunning) > 0 {
+					fmt.Fprintf(w, ", still running: %v", s.StillRunning)
+				}
+				fmt.Fprintln(w, ")")
+			} else {
+				fmt.Fprintf(w, "root exit: +%s (session still open at capture end)\n", fmtDurMs(s.RootExitMs))
+			}
+		}
 		fmt.Fprintf(w, "top programs by exec count:")
 		for _, p := range s.ProgramsByCount {
 			fmt.Fprintf(w, " %s=%d", p.Name, p.ExecCount)

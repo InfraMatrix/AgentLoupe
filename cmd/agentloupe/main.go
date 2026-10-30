@@ -52,6 +52,7 @@ func main() {
 	flag.BoolVar(&o.EnableFileMutations, "enable-file-mutations", false, "opt-in: unlink/rename/chmod events (default probes are process, file-open, network only)")
 	flag.DurationVar(&o.StatsInterval, "stats-interval", 10*time.Second, "how often to print drop/map-full counters (0 = only on shutdown)")
 	flag.DurationVar(&o.SyscallInterval, "syscall-interval", time.Second, "how often to emit syscall_summary JSONL events (deltas; requires --enable-syscall-summary; 0 = only final flush on session end/shutdown)")
+	flag.DurationVar(&o.OrphanTimeout, "orphan-timeout", 3*time.Minute, "how long a session stays open after its root exits while tracked child processes remain alive; on expiry session_end is emitted with reason orphan_timeout (0 = wait indefinitely)")
 	var dropPrefixes, attachComms, attachExes, catalogOnly multiFlag
 	var attachPIDs multiInt
 	flag.Var(&dropPrefixes, "drop-path-prefix", "drop file events whose path has this prefix (repeatable; e.g. /proc/)")
