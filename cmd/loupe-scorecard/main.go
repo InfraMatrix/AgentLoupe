@@ -33,6 +33,7 @@ type event struct {
 	ReadB        uint64   `json:"read_bytes"`
 	WriteB       uint64   `json:"write_bytes"`
 	Bytes        uint64   `json:"bytes"`
+	LatencyUs    uint64   `json:"latency_us,omitempty"`
 	Partial      bool     `json:"partial"`
 	CPUUserMS    uint64   `json:"cpu_user_ms"`
 	CPUSysMS     uint64   `json:"cpu_sys_ms"`
@@ -62,13 +63,17 @@ type scorecard struct {
 	DNS        int     `json:"dns_connects"`
 	Sends      int     `json:"net_sends"`
 	SentBytes  uint64  `json:"net_sent_bytes"`
-	// Hostnames seen on this session's sends (DNS qnames, TLS SNIs),
-	// sorted, unique: which names the agent looked up or connected to
-	// by name. Empty when no send carried a parseable name.
-	Hostnames  []string `json:"hostnames,omitempty"`
-	CPUUserMS  uint64  `json:"cpu_user_ms,omitempty"`
-	CPUSysMS   uint64  `json:"cpu_sys_ms,omitempty"`
-	RootExit   string  `json:"root_exit,omitempty"`
+	Recvs      int     `json:"net_recvs"`
+	RecvBytes  uint64  `json:"net_recv_bytes"`
+	FirstResp  uint64  `json:"first_response_us,omitempty"`
+	// Hostnames seen on this session's sends and recvs (DNS qnames,
+	// TLS SNIs), sorted, unique: which names the agent looked up or
+	// connected to by name. Empty when no send or recv carried a
+	// parseable name.
+	Hostnames []string `json:"hostnames,omitempty"`
+	CPUUserMS uint64   `json:"cpu_user_ms,omitempty"`
+	CPUSysMS  uint64   `json:"cpu_sys_ms,omitempty"`
+	RootExit  string   `json:"root_exit,omitempty"`
 	// OrphanGapS is session_end minus root_exit, in seconds: how
 	// long the session outlived its root. Set only when both exist.
 	OrphanGapS       float64        `json:"orphan_gap_s,omitempty"`
@@ -114,7 +119,7 @@ func summarize(events []event) []*scorecard {
 			s = &scorecard{SessionID: ev.SessionID, Agent: ev.AgentName,
 				paths: map[string]bool{}, hosts: map[string]bool{},
 				comms: map[string]int{},
-				dirs: map[string]int{}, net: map[string]int{}}
+				dirs:  map[string]int{}, net: map[string]int{}}
 			byID[ev.SessionID] = s
 			order = append(order, s)
 		}
@@ -179,6 +184,19 @@ func summarize(events []event) []*scorecard {
 			// the session's sorted unique list below.
 			s.Sends++
 			s.SentBytes += ev.Bytes
+			if ev.Hostname != "" {
+				s.hosts[ev.Hostname] = true
+			}
+		case "net_recv":
+			// Count recvs and bytes like sends. FirstResp keeps the
+			// first paired send->recv latency: the session's TTFT
+			// proxy. latency_us 0 means unpaired (no send seen on
+			// this thread/socket), so it never sets FirstResp.
+			s.Recvs++
+			s.RecvBytes += ev.Bytes
+			if ev.LatencyUs > 0 && s.FirstResp == 0 {
+				s.FirstResp = ev.LatencyUs
+			}
 			if ev.Hostname != "" {
 				s.hosts[ev.Hostname] = true
 			}
@@ -259,8 +277,11 @@ func main() {
 		fmt.Printf("%-22s %-10d %7.1fs %6d %6d %7d %7d %9d %9d %5d %d+%d\n",
 			trunc(s.Agent, 22), s.SessionID%10000000000, s.DurationS, s.Execs, s.Forks,
 			s.Opens, s.UniqPaths, s.ReadBytes, s.WriteBytes, s.Connects, s.CPUUserMS, s.CPUSysMS)
-		fmt.Printf("    comms=%v dirs=%v net=%v dns=%d sends=%d sent_bytes=%d hosts=%v mutations=%d reads=%d writes=%d\n",
-			s.TopComms, s.TopDirs, s.Net, s.DNS, s.Sends, s.SentBytes, s.Hostnames, s.Mutations, s.Reads, s.Writes)
+		fmt.Printf("    comms=%v dirs=%v net=%v dns=%d sends=%d sent_bytes=%d recvs=%d recv_bytes=%d hosts=%v mutations=%d reads=%d writes=%d\n",
+			s.TopComms, s.TopDirs, s.Net, s.DNS, s.Sends, s.SentBytes, s.Recvs, s.RecvBytes, s.Hostnames, s.Mutations, s.Reads, s.Writes)
+		if s.FirstResp > 0 {
+			fmt.Printf("    first_response_us=%d\n", s.FirstResp)
+		}
 		if s.RootExit != "" {
 			fmt.Printf("    root_exit=%s orphan_gap=%.1fs end_reason=%s still_running=%v\n",
 				s.RootExit, s.OrphanGapS, s.SessionEndReason, s.StillRunning)

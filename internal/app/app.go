@@ -30,7 +30,7 @@ type Options struct {
 	// Works without EnableIOAccounting; duration_us is filled by the
 	// slice-2b fentry pairing when it attaches (0 = unknown or
 	// sub-microsecond).
-	EnableFileRWEvents   bool
+	EnableFileRWEvents bool
 	// EnableNetSendEvents opts into per-call net_send events (ABI v7,
 	// slices 3/4): one discrete event per tcp/udp_sendmsg call with this
 	// call's byte count and destination. Off by default: per-send
@@ -39,13 +39,18 @@ type Options struct {
 	// hostname on those events (DNS qname / TLS SNI) via its own
 	// sys_enter probe under the same flag; an empty hostname means the
 	// send buffer held no parseable name, never a lost event.
-	EnableNetSendEvents  bool
+	// Slice 5 (ABI v8) adds the other half: per-call net_recv events
+	// with this call's bytes plus latency_us pairing each recv with the
+	// thread's most recent send on the same socket (time-to-first-byte
+	// for the first recv after a request). Same flag, same loudness
+	// warning; latency_us = 0 means unknown, never a dropped event.
+	EnableNetSendEvents bool
 	// EnableFileMutations is accepted for compatibility but ignored:
 	// file mutations (unlink/rename/chmod) are core since slice 1
 	// and always attached.
-	EnableFileMutations  bool
-	StatsInterval        time.Duration
-	SyscallInterval      time.Duration
+	EnableFileMutations bool
+	StatsInterval       time.Duration
+	SyscallInterval     time.Duration
 	// OrphanTimeout bounds how long a session stays open after its
 	// root exits while tracked processes remain (0 = wait
 	// indefinitely). See Processor.OrphanTimeout.
@@ -67,7 +72,7 @@ type progReq struct {
 	Kind   string // raw_tp | tracepoint | kprobe | lsm | fexit
 	Group  string // tracepoint group, when Kind == tracepoint
 	Target string // symbol / tracepoint name
-	Tag    string // core | io | syscall | netkprobe | lat | netsend | sndhost
+	Tag    string // core | io | syscall | netkprobe | lat | netsend | sndhost | netrecv
 }
 
 func buildRequests(lsmMode bool, o Options) []progReq {
@@ -132,6 +137,15 @@ func buildRequests(lsmMode bool, o Options) []progReq {
 			progReq{Name: "handle_tcp_sendmsg", Kind: "fexit", Target: "tcp_sendmsg", Tag: "netsend"},
 			progReq{Name: "handle_udp_sendmsg", Kind: "fexit", Target: "udp_sendmsg", Tag: "netsend"})
 	}
+	// Slice 5: fexit on tcp/udp_recvmsg for per-call recv events with
+	// send->recv latency. Same flag, own tag: a bad recvmsg prototype
+	// degrades to sends without recvs (latency stays unknown) instead
+	// of losing the send events.
+	if o.EnableNetSendEvents {
+		reqs = append(reqs,
+			progReq{Name: "handle_tcp_recvmsg", Kind: "fexit", Target: "tcp_recvmsg", Tag: "netrecv"},
+			progReq{Name: "handle_udp_recvmsg", Kind: "fexit", Target: "udp_recvmsg", Tag: "netrecv"})
+	}
 	// Slice 4: the sys_enter hostname parser rides the same flag with
 	// its own tag, so a verifier rejection of the parsers degrades to
 	// empty hostnames instead of losing the send events.
@@ -182,9 +196,10 @@ type loadAttempt struct {
 func loadCollection(object string, reqs []progReq, logf func(string, ...any)) (*ebpf.Collection, []progReq, string, error) {
 	attempts := []loadAttempt{
 		{"full requested set", nil, false},
-		{"without syscall summary", map[string]bool{"core": true, "io": true, "lat": true, "netkprobe": true, "netsend": true, "sndhost": true}, false},
-		{"without fentry latency (durations stay zero)", map[string]bool{"core": true, "io": true, "netkprobe": true, "netsend": true, "sndhost": true}, false},
-		{"without send hostnames (hostnames stay empty)", map[string]bool{"core": true, "io": true, "netkprobe": true, "netsend": true}, false},
+		{"without syscall summary", map[string]bool{"core": true, "io": true, "lat": true, "netkprobe": true, "netsend": true, "sndhost": true, "netrecv": true}, false},
+		{"without fentry latency (durations stay zero)", map[string]bool{"core": true, "io": true, "netkprobe": true, "netsend": true, "sndhost": true, "netrecv": true}, false},
+		{"without send hostnames (hostnames stay empty)", map[string]bool{"core": true, "io": true, "netkprobe": true, "netsend": true, "netrecv": true}, false},
+		{"without net recvs (recv latency stays unknown)", map[string]bool{"core": true, "io": true, "netkprobe": true, "netsend": true}, false},
 		{"without net sends", map[string]bool{"core": true, "io": true, "netkprobe": true}, false},
 		{"without io accounting or syscall summary", map[string]bool{"core": true, "netkprobe": true}, false},
 		{"core + network kprobes only", map[string]bool{"core": true, "netkprobe": true}, false},
@@ -347,8 +362,9 @@ func Run(ctx context.Context, o Options) error {
 	// File mutations are core since slice 1: always enabled in the
 	// kernel config (the slot is retained for ABI stability).
 	// Per-call read/write events are opt-in (slot 5, ABI v5);
-	// per-call send events are opt-in (slot 6, ABI v6; slice 4 send
-	// hostnames ride the same slot, no new toggle).
+	// per-call send/recv events are opt-in (slot 6, ABI v6/v8;
+	// slice 4 send hostnames and slice 5 recv pairing ride the same
+	// slot, no new toggle).
 	if err := loader.setConfig(o.EnableIOAccounting, o.EnableSyscallSummary, true, o.EnableFileRWEvents, o.EnableNetSendEvents); err != nil {
 		return err
 	}
@@ -375,6 +391,7 @@ func Run(ctx context.Context, o Options) error {
 	latAttached := 0
 	sendAttached := 0
 	hostAttached := 0
+	recvAttached := 0
 	for _, r := range useReqs {
 		ok := attach(r)
 		if !ok && r.Tag == "netkprobe" {
@@ -388,6 +405,9 @@ func Run(ctx context.Context, o Options) error {
 		}
 		if ok && r.Tag == "sndhost" {
 			hostAttached++
+		}
+		if ok && r.Tag == "netrecv" {
+			recvAttached++
 		}
 	}
 	// sys_enter_connect is ALWAYS attached: with TCP fexit live it runs
@@ -413,8 +433,8 @@ func Run(ctx context.Context, o Options) error {
 	if len(fallbacks) > 0 {
 		logf("feature probe: failed/fallback hooks: %s", strings.Join(fallbacks, ", "))
 	}
-	logf("probes enabled: process=yes file_open=yes file_mutations=yes network=yes io_accounting=%v file_rw_events=%v file_rw_latency=%v net_send_events=%v net_send_hostnames=%v syscall_summary=%v",
-		o.EnableIOAccounting, o.EnableFileRWEvents, o.EnableFileRWEvents && latAttached == 4, o.EnableNetSendEvents && sendAttached == 2, o.EnableNetSendEvents && hostAttached == 1, o.EnableSyscallSummary)
+	logf("probes enabled: process=yes file_open=yes file_mutations=yes network=yes io_accounting=%v file_rw_events=%v file_rw_latency=%v net_send_events=%v net_send_hostnames=%v net_recv_events=%v syscall_summary=%v",
+		o.EnableIOAccounting, o.EnableFileRWEvents, o.EnableFileRWEvents && latAttached == 4, o.EnableNetSendEvents && sendAttached == 2, o.EnableNetSendEvents && hostAttached == 1, o.EnableNetSendEvents && recvAttached == 2, o.EnableSyscallSummary)
 
 	if coll.Maps["events"] == nil {
 		return fmt.Errorf("events ring buffer map missing from object")

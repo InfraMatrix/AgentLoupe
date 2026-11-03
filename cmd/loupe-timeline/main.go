@@ -48,6 +48,7 @@ type rawEvent struct {
 	Mode         string                       `json:"mode"`
 	OpenFlags    uint32                       `json:"open_flags"`
 	Bytes        uint64                       `json:"bytes"`
+	LatencyUs    uint64                       `json:"latency_us"`
 	ChildPID     uint32                       `json:"child_pid"`
 	Daddr        string                       `json:"daddr"`
 	Dport        uint16                       `json:"dport"`
@@ -159,13 +160,15 @@ type PathStat struct {
 }
 
 type NetStat struct {
-	Dest      string   `json:"dest"`
-	Count     int      `json:"count"`
-	DNS       int      `json:"dns_count"`
-	Sends     int      `json:"sends,omitempty"`
-	SentBytes uint64   `json:"sent_bytes,omitempty"`
-	// Hostnames seen on this destination's sends (DNS qnames, TLS
-	// SNIs), unique, first-seen order, capped: enrichment, not a log.
+	Dest      string `json:"dest"`
+	Count     int    `json:"count"`
+	DNS       int    `json:"dns_count"`
+	Sends     int    `json:"sends,omitempty"`
+	SentBytes uint64 `json:"sent_bytes,omitempty"`
+	Recvs     int    `json:"recvs,omitempty"`
+	RecvBytes uint64 `json:"recv_bytes,omitempty"`
+	// Hostnames seen on this destination's sends and recvs (DNS qnames,
+	// TLS SNIs), unique, first-seen order, capped: enrichment, not a log.
 	Hostnames []string `json:"hostnames,omitempty"`
 }
 
@@ -540,6 +543,49 @@ func (b *builder) add(ev *rawEvent) {
 				detail += fmt.Sprintf(" %s", ev.Hostname)
 			}
 			s.addMarker(&Marker{Ts: ev.Ts, Type: "net_send", PID: ev.PID, Detail: detail})
+		}
+	case "net_recv":
+		dest := fmt.Sprintf("%s:%d", ev.Daddr, ev.Dport)
+		ns, ok := s.net[dest]
+		if !ok {
+			ns = &NetStat{Dest: dest}
+			s.net[dest] = ns
+		}
+		// Recvs share the per-dest entry with connects and sends so
+		// per-destination response volume and latency sit next to the
+		// requests. Hostnames arrive paired from the send, so the same
+		// enrichment applies.
+		ns.Recvs++
+		ns.RecvBytes += ev.Bytes
+		if ev.Hostname != "" {
+			known := false
+			for _, h := range ns.Hostnames {
+				if h == ev.Hostname {
+					known = true
+					break
+				}
+			}
+			if !known && len(ns.Hostnames) < 8 {
+				ns.Hostnames = append(ns.Hostnames, ev.Hostname)
+			}
+		}
+		if hasTS {
+			detail := dest
+			if pn := protoName(ev.Protocol); pn != "" {
+				detail = pn + " " + detail
+			}
+			if ev.LatencyUs > 0 {
+				detail += fmt.Sprintf(" (%d bytes, +%dus)", ev.Bytes, ev.LatencyUs)
+			} else {
+				detail += fmt.Sprintf(" (%d bytes, unpaired)", ev.Bytes)
+			}
+			if ev.DNS {
+				detail += " (DNS)"
+			}
+			if ev.Hostname != "" {
+				detail += fmt.Sprintf(" %s", ev.Hostname)
+			}
+			s.addMarker(&Marker{Ts: ev.Ts, Type: "net_recv", PID: ev.PID, Detail: detail})
 		}
 	case "syscall_summary":
 		b.hasSummary = true

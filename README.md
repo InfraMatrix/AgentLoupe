@@ -89,9 +89,12 @@ Opt-in probes (off by default):
                            # (ABI v5: this call's size + timestamps only;
                            # works without --enable-io-accounting)
 --enable-net-send-events   # discrete net_send event per tcp/udp_sendmsg call
+                           # and net_recv event per tcp/udp_recvmsg call
                            # (ABI v7: this call's bytes + destination +
                            # hostname — DNS qname / TLS SNI parsed from
-                           # the send buffer; empty when it holds no name)
+                           # the send buffer; empty when it holds no name;
+                           # ABI v8: recv carries latency_us, the send->recv
+                           # time-to-first-byte; 0 when unpaired)
 ```
 
 ### Try the demo (one command)
@@ -260,8 +263,25 @@ fires on every send a tracked process makes. The events land in the
 timeline as per-destination markers (with byte counts and hostnames) and
 in the scorecard as `net_sends`/`net_sent_bytes` totals plus a sorted
 unique `hostnames` list (per-destination send volume and per-dest
-hostnames stay in the timeline's net entries). No per-call latency field:
-slice 3 is attribution first.
+hostnames stay in the timeline's net entries). Each send also stamps a
+per-(thread, socket) last-send record consumed by the recv path below,
+so enabling sends is what arms recv latency.
+
+#### `net_recv` events (ABI v8)
+
+The same flag emits one event per `tcp_recvmsg`/`udp_recvmsg` call on a
+tracked socket (failed calls emit nothing). `bytes` is this call's byte
+count; the address fields are the **remote peer** — the sock's peer for
+TCP, the datagram's source address for UDP. `latency_us` is the
+microseconds from the last send on the same thread and socket to this
+recv: the call's time-to-first-byte. It is 0 when no send was seen
+(recv before any send, a cross-thread send/recv pair, an evicted
+record) — unknown, never wrong. The send's `hostname` rides along onto
+the recv, so responses inherit the name of the request that caused
+them. Recvs land in the timeline as per-destination markers (with byte
+counts, latencies, and hostnames) and in the scorecard as
+`net_recvs`/`net_recv_bytes` totals plus `first_response_us`, the
+session's first paired send→recv latency.
 
 `hostname` (ABI v7) is the DNS query name for UDP sends and the TLS
 ClientHello SNI for TCP sends, parsed from **this call's** send buffer at

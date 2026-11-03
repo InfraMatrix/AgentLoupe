@@ -46,6 +46,7 @@ type capturedEvent struct {
 	Hostname     string                       `json:"hostname"`
 	Duration     *uint64                      `json:"duration_ms"`
 	Bytes        *uint64                      `json:"bytes"`
+	LatencyUs    *uint64                      `json:"latency_us"`
 	ExitCode     int32                        `json:"exit_code"`
 	Reason       string                       `json:"reason"`
 	StillRunning []uint32                     `json:"still_running"`
@@ -192,7 +193,7 @@ var agentloupeMapNames = map[string]bool{
 	"syscall_counts": true, "session_counter": true, "config_map": true,
 	"stats": true, "counters": true, "path_scratch_ma": true,
 	"pending_file_op": true, "rw_inflight": true, "snd_hostnames": true,
-	"events": true,
+	"send_inflight": true, "events": true,
 }
 
 func TestIntegrationLoaderObserveOnly(t *testing.T) {
@@ -248,13 +249,31 @@ func TestIntegrationLoaderObserveOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer listener.Close()
+	// Slice 5: echo back everything so the workload's recvs exercise
+	// the tcp_recvmsg fexit (request->response pairing). Reads then
+	// writes back each chunk; the workload reads exactly what it sent,
+	// so one 5-byte recv pairs with the one 5-byte send.
 	go func() {
 		for {
 			conn, err := listener.Accept()
 			if err != nil {
 				return
 			}
-			conn.Close()
+			go func(c net.Conn) {
+				defer c.Close()
+				buf := make([]byte, 2048)
+				for {
+					n, rerr := c.Read(buf)
+					if n > 0 {
+						if _, werr := c.Write(buf[:n]); werr != nil {
+							return
+						}
+					}
+					if rerr != nil {
+						return
+					}
+				}
+			}(conn)
 		}
 	}()
 	listenPort := uint16(listener.Addr().(*net.TCPAddr).Port)
@@ -270,6 +289,21 @@ func TestIntegrationLoaderObserveOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer udpConn.Close()
+	// Slice 5: echo UDP datagrams back so the workload's recv exercises
+	// the udp_recvmsg fexit. The DNS query sendto also lands here and is
+	// echoed to a socket that never reads — harmless, no recv event.
+	go func() {
+		buf := make([]byte, 2048)
+		for {
+			n, addr, err := udpConn.ReadFromUDP(buf)
+			if err != nil {
+				return
+			}
+			if _, err := udpConn.WriteToUDP(buf[:n], addr); err != nil {
+				return
+			}
+		}
+	}()
 	udpPort := uint16(udpConn.LocalAddr().(*net.UDPAddr).Port)
 
 	// Baseline kernel-object state, for the post-shutdown leak check.
@@ -297,7 +331,7 @@ func TestIntegrationLoaderObserveOnly(t *testing.T) {
 			// workload's TCP/UDP sends below must surface as
 			// net_send events with this call's bytes.
 			EnableNetSendEvents: true,
-			SyscallInterval:    100 * time.Millisecond,
+			SyscallInterval:     100 * time.Millisecond,
 		})
 		close(loaderDone)
 	}()
@@ -319,7 +353,7 @@ func TestIntegrationLoaderObserveOnly(t *testing.T) {
 	const dnsName = "agentloupe-probe.invalid"
 	const sniName = "agentloupe-tls.invalid"
 	script := fmt.Sprintf(`
-import socket, struct, subprocess
+import socket, struct, subprocess, time
 marker = %q
 with open(%q, "w") as f:
     f.write("agentloupe")
@@ -329,10 +363,19 @@ with open(%q, "w") as f:
     f.write(str(p.pid))
 s = socket.create_connection(("127.0.0.1", %d), timeout=5)
 s.send(b"hello")
+time.sleep(0.01)
+data = b""
+while len(data) < 5:
+    chunk = s.recv(5 - len(data))
+    if not chunk:
+        break
+    data += chunk
 s.close()
 u = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 u.connect(("127.0.0.1", %d))
 u.send(b"x")
+time.sleep(0.01)
+u.recv(1)
 u.close()
 def qname(name):
     return b"".join(bytes([len(p)]) + p for p in name.split(b".")) + b"\x00"
@@ -490,6 +533,8 @@ FOUND:
 	var udpSendEv *capturedEvent
 	var sniSendEv *capturedEvent
 	var dnsSendEv *capturedEvent
+	var tcpRecvEv *capturedEvent
+	var udpRecvEv *capturedEvent
 	for i := range events {
 		ev := &events[i]
 		if ev.Type == "net_connect" && ev.PID == uint32(lastWorkload.pyPID) && ev.Protocol == 17 {
@@ -523,6 +568,16 @@ FOUND:
 		}
 		if ev.Type == "net_send" && ev.PID == uint32(lastWorkload.pyPID) && ev.Protocol == 17 && ev.Dport == udpPort && ev.Hostname == dnsName {
 			dnsSendEv = ev
+		}
+		// Slice 5: the echo replies must surface as discrete net_recv
+		// events pairing with the sends above (first match wins: the
+		// 10ms sleep guarantees the whole reply is buffered, so one
+		// recv consumes the whole pairing).
+		if ev.Type == "net_recv" && ev.PID == uint32(lastWorkload.pyPID) && ev.Protocol == 6 && ev.Dport == listenPort && tcpRecvEv == nil {
+			tcpRecvEv = ev
+		}
+		if ev.Type == "net_recv" && ev.PID == uint32(lastWorkload.pyPID) && ev.Protocol == 17 && ev.Dport == udpPort && udpRecvEv == nil {
+			udpRecvEv = ev
 		}
 	}
 	if udpEv == nil {
@@ -600,13 +655,49 @@ FOUND:
 	if sniSendEv.AgentName != agentName {
 		fail("SNI net_send agent_name = %q, want %q", sniSendEv.AgentName, agentName)
 	}
+	// Slice 5: the echo replies must pair with the sends above. The
+	// workload sleeps 10ms between each send and its recv, so the
+	// paired latency is ~10ms — the floor of 5ms leaves 2x margin for
+	// scheduling noise while still proving the pairing (an unpaired
+	// recv would report latency_us = 0).
+	if tcpRecvEv == nil {
+		fail("missing TCP net_recv to 127.0.0.1:%d (pid %d) despite --enable-net-send-events", listenPort, lastWorkload.pyPID)
+	}
+	if tcpRecvEv.Bytes == nil || *tcpRecvEv.Bytes != 5 {
+		fail("TCP net_recv bytes = %v, want 5 (one 5-byte echo read): %s", tcpRecvEv.Bytes, tcpRecvEv.Raw)
+	}
+	if tcpRecvEv.Daddr != "127.0.0.1" {
+		fail("TCP net_recv daddr = %q, want 127.0.0.1: %s", tcpRecvEv.Daddr, tcpRecvEv.Raw)
+	}
+	if tcpRecvEv.Hostname != "" {
+		fail("TCP net_recv hostname = %q, want empty (paired with the raw-payload send): %s", tcpRecvEv.Hostname, tcpRecvEv.Raw)
+	}
+	if tcpRecvEv.LatencyUs == nil || *tcpRecvEv.LatencyUs < 5000 {
+		fail("TCP net_recv latency_us = %v, want >= 5000 (10ms send->recv sleep): %s", tcpRecvEv.LatencyUs, tcpRecvEv.Raw)
+	}
+	if udpRecvEv == nil {
+		fail("missing UDP net_recv to 127.0.0.1:%d (pid %d) despite --enable-net-send-events", udpPort, lastWorkload.pyPID)
+	}
+	if udpRecvEv.Bytes == nil || *udpRecvEv.Bytes != 1 {
+		fail("UDP net_recv bytes = %v, want 1 (one 1-byte echo read): %s", udpRecvEv.Bytes, udpRecvEv.Raw)
+	}
+	if udpRecvEv.Daddr != "127.0.0.1" {
+		fail("UDP net_recv daddr = %q, want 127.0.0.1: %s", udpRecvEv.Daddr, udpRecvEv.Raw)
+	}
+	if udpRecvEv.Hostname != "" {
+		fail("UDP net_recv hostname = %q, want empty (paired with the raw-payload send): %s", udpRecvEv.Hostname, udpRecvEv.Raw)
+	}
+	if udpRecvEv.LatencyUs == nil || *udpRecvEv.LatencyUs < 5000 {
+		fail("UDP net_recv latency_us = %v, want >= 5000 (10ms send->recv sleep): %s", udpRecvEv.LatencyUs, udpRecvEv.Raw)
+	}
 
 	if pyExec.SessionID == 0 || fileOpen.SessionID != pyExec.SessionID ||
 		connect.SessionID != pyExec.SessionID || trueExec.SessionID == 0 ||
 		writeEv.SessionID != pyExec.SessionID || tcpSendEv.SessionID != pyExec.SessionID ||
-		sniSendEv.SessionID != pyExec.SessionID || dnsSendEv.SessionID != pyExec.SessionID {
-		fail("session IDs disagree: exec=%d file_open=%d connect=%d child_exec=%d file_write=%d net_send=%d sni_send=%d dns_send=%d",
-			pyExec.SessionID, fileOpen.SessionID, connect.SessionID, trueExec.SessionID, writeEv.SessionID, tcpSendEv.SessionID, sniSendEv.SessionID, dnsSendEv.SessionID)
+		sniSendEv.SessionID != pyExec.SessionID || dnsSendEv.SessionID != pyExec.SessionID ||
+		tcpRecvEv.SessionID != pyExec.SessionID || udpRecvEv.SessionID != pyExec.SessionID {
+		fail("session IDs disagree: exec=%d file_open=%d connect=%d child_exec=%d file_write=%d net_send=%d sni_send=%d dns_send=%d tcp_recv=%d udp_recv=%d",
+			pyExec.SessionID, fileOpen.SessionID, connect.SessionID, trueExec.SessionID, writeEv.SessionID, tcpSendEv.SessionID, sniSendEv.SessionID, dnsSendEv.SessionID, tcpRecvEv.SessionID, udpRecvEv.SessionID)
 	}
 
 	// Our programs, for the post-shutdown link cross-reference.
@@ -627,7 +718,7 @@ FOUND:
 		fail("reading stats map: %v", err)
 	}
 	var totalDrops, totalEmitted uint64
-	for typ := uint32(1); typ <= 15; typ++ {
+	for typ := uint32(1); typ <= 16; typ++ {
 		vals := make([]statVal, possibleCPUs())
 		key := typ
 		if err := statsMap.Lookup(&key, &vals); err != nil {

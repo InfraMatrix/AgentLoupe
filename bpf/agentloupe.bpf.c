@@ -1550,6 +1550,69 @@ store:
 	return 0;
 }
 
+/* Resolve this call's peer into (daddr, family, dport). Shared by the
+ * send and recv emitters so both halves of a call carry the same endpoint
+ * identity. Unconnected UDP takes the per-call address from msg->msg_name;
+ * everything else falls back to the sock's peer fields.
+ *
+ * name_is_user selects the probe: on the SEND fexit msg_name points at a
+ * kernel-stack copy (___sys_sendmsg/__sys_sendto copy the sockaddr there
+ * and rewrite msg_name to point at it), so the send side reads _kernel;
+ * on the RECV fexit the recv path never rewrites msg_name — it still
+ * points at the caller's buffer, already filled with the source address by
+ * the protocol's recvmsg — so the recv side reads _user. A failed or
+ * unparseable name is NOT an error: the sock fallback below still runs.
+ * Only a sock with no usable peer (non-INET family) returns false, in
+ * which case there is nothing to attribute. */
+static __always_inline bool
+net_dest(struct sock *sk, struct msghdr *msg, bool is_udp, bool name_is_user,
+	 unsigned char *daddr, __u16 *family, __u16 *dport)
+{
+	if (is_udp && msg) {
+		if (BPF_CORE_READ(msg, msg_namelen) != 0) {
+			const void *name = BPF_CORE_READ(msg, msg_name);
+			unsigned char sa[28] = {};
+			int rc;
+
+			if (!name)
+				goto sock;
+			rc = name_is_user ?
+				bpf_probe_read_user(sa, sizeof(sa), name) :
+				bpf_probe_read_kernel(sa, sizeof(sa), name);
+			if (rc == 0) {
+				__u16 f = (__u16)sa[0] | ((__u16)sa[1] << 8);
+
+				if (f == AF_INET) {
+					*family = f;
+					*dport = ((__u16)sa[2] << 8) | sa[3];
+					__builtin_memcpy(daddr, &sa[4], 4);
+					return true;
+				} else if (f == AF_INET6) {
+					*family = f;
+					*dport = ((__u16)sa[2] << 8) | sa[3];
+					__builtin_memcpy(daddr, &sa[8], 16);
+					return true;
+				}
+			}
+		}
+	}
+sock:
+	*family = BPF_CORE_READ(sk, __sk_common.skc_family);
+	if (*family != AF_INET && *family != AF_INET6)
+		return false;
+	if (*family == AF_INET) {
+		__u32 a = BPF_CORE_READ(sk, __sk_common.skc_daddr);
+
+		__builtin_memcpy(daddr, &a, 4);
+	} else {
+		struct in6_addr a6 = BPF_CORE_READ(sk, __sk_common.skc_v6_daddr);
+
+		__builtin_memcpy(daddr, &a6, 16);
+	}
+	*dport = bpf_ntohs(BPF_CORE_READ(sk, __sk_common.skc_dport));
+	return true;
+}
+
 /* Slice 3: one discrete event per tcp/udp_sendmsg call on a tracked
  * socket, carrying this call's byte count and destination — the
  * network-side equivalent of slice 2a. Opt-in via enable_net_send_events
@@ -1562,7 +1625,11 @@ store:
  * resolve_scope attributes to the sender's session exactly like
  * net_connect (no REJECTED check, mirroring connect). Destination is
  * fully validated BEFORE reserve_event: a post-reserve early return
- * would leak the reservation. */
+ * would leak the reservation. Slice 5 stamps every emitted send in
+ * send_inflight (keyed on (thread, sock)) for the recv side to pair
+ * against; the shared net_dest helper above resolves the peer for both
+ * emitters (send reads msg_name as _kernel, recv as _user — see its
+ * comment for why they differ). */
 static __always_inline void
 emit_net_send(struct sock *sk, struct msghdr *msg, __u64 bytes, bool is_udp)
 {
@@ -1574,56 +1641,13 @@ emit_net_send(struct sock *sk, struct msghdr *msg, __u64 bytes, bool is_udp)
 	__u32 tgid = cur_tgid();
 	__u16 family = 0, dport = 0;
 	__u8 proto = is_udp ? IPPROTO_UDP : IPPROTO_TCP;
-	bool have_dest = false;
 
 	if (!cfg_enabled(6))
 		return;
 	if (!resolve_scope(tgid, cur_task(), &sid, &info, &cgid))
 		return;
-	if (is_udp && msg) {
-		/* Unconnected send: the destination is per-call. At fexit,
-		 * msg is the kernel's struct msghdr: ___sys_sendmsg /
-		 * __sys_sendto copy the sockaddr onto the kernel stack and
-		 * rewrite msg_name to point at that kernel copy, so this
-		 * must be a _kernel read, not _user (the _user read fails
-		 * and the event degrades to the unconnected sock's
-		 * 0.0.0.0:0). */
-		if (BPF_CORE_READ(msg, msg_namelen) != 0) {
-			const void *name = BPF_CORE_READ(msg, msg_name);
-			unsigned char sa[28] = {};
-
-			if (name && bpf_probe_read_kernel(sa, sizeof(sa), name) == 0) {
-				__u16 f = (__u16)sa[0] | ((__u16)sa[1] << 8);
-
-				if (f == AF_INET) {
-					family = f;
-					dport = ((__u16)sa[2] << 8) | sa[3];
-					__builtin_memcpy(daddr, &sa[4], 4);
-					have_dest = true;
-				} else if (f == AF_INET6) {
-					family = f;
-					dport = ((__u16)sa[2] << 8) | sa[3];
-					__builtin_memcpy(daddr, &sa[8], 16);
-					have_dest = true;
-				}
-			}
-		}
-	}
-	if (!have_dest) {
-		family = BPF_CORE_READ(sk, __sk_common.skc_family);
-		if (family != AF_INET && family != AF_INET6)
-			return;
-		if (family == AF_INET) {
-			__u32 a = BPF_CORE_READ(sk, __sk_common.skc_daddr);
-
-			__builtin_memcpy(daddr, &a, 4);
-		} else {
-			struct in6_addr a6 = BPF_CORE_READ(sk, __sk_common.skc_v6_daddr);
-
-			__builtin_memcpy(daddr, &a6, 16);
-		}
-		dport = bpf_ntohs(BPF_CORE_READ(sk, __sk_common.skc_dport));
-	}
+	if (!net_dest(sk, msg, is_udp, false, daddr, &family, &dport))
+		return;
 	hdr = reserve_event(EVENT_NET_SEND, EVLEN_NET_SEND, sid, &info,
 			    cur_task(), tgid);
 	if (!hdr)
@@ -1646,18 +1670,29 @@ emit_net_send(struct sock *sk, struct msghdr *msg, __u64 bytes, bool is_udp)
 	if (ev->dport == 53)
 		ev->flags |= 1; /* DNS */
 	ev->bytes = bytes;
-	/* Slice 4: consume this thread's sys_enter parse, if any. The
-	 * reservation zero-fills hostname, so a miss (enter skipped,
-	 * degraded, or never attached) simply leaves it empty. */
+	/* Slices 4+5: consume this thread's sys_enter parse, if any, and
+	 * stamp this send for the recv side to pair against. The reservation
+	 * zero-fills hostname, so a miss (enter skipped, degraded, or never
+	 * attached) simply leaves it empty — on both the event and the
+	 * in-flight entry. The entry is stamped only for emitted sends (a
+	 * failed reservation returns above), so every entry the recv side
+	 * consumes refers to a send the userspace actually saw. */
 	{
+		struct send_inflight_key key;
+		struct send_inflight_val val = {};
 		__u64 tgid_pid = bpf_get_current_pid_tgid();
 		struct snd_hostname *h;
 
 		h = bpf_map_lookup_elem(&snd_hostnames, &tgid_pid);
 		if (h) {
 			__builtin_memcpy(ev->hostname, h->name, MAX_HOSTNAME_LEN);
+			__builtin_memcpy(val.hostname, h->name, MAX_HOSTNAME_LEN);
 			bpf_map_delete_elem(&snd_hostnames, &tgid_pid);
 		}
+		val.send_ts_ns = bpf_ktime_get_ns();
+		key.pid_tgid = tgid_pid;
+		key.sock = (unsigned long)sk;
+		bpf_map_update_elem(&send_inflight, &key, &val, BPF_ANY);
 	}
 	submit_event(hdr, EVENT_NET_SEND);
 }
@@ -1684,6 +1719,115 @@ int BPF_PROG(handle_udp_sendmsg, struct sock *sk, struct msghdr *msg,
 	if (ret <= 0)
 		return 0;
 	emit_net_send(sk, msg, (__u64)ret, true);
+	return 0;
+}
+
+/* Slice 5: one discrete event per tcp/udp_recvmsg call on a tracked
+ * socket, carrying this call's byte count and the request->response
+ * latency paired from send_inflight — the network-side equivalent of
+ * slice 2b. Opt-in via enable_net_send_events (slot 6): the slot now
+ * gates sends AND recvs, the two halves of one call. Only successful
+ * calls emit (the callers skip ret <= 0, like sends): there is no errno
+ * to report and nothing to attribute on failure. The first recv after a
+ * send measures time-to-first-byte; later recvs on the same socket (a
+ * chunked/streaming response) measure inter-chunk latency against the
+ * same send until the next send overwrites it. A recv with no paired send
+ * — an accepted server-side socket that only ever receives, a
+ * cross-thread send/recv pair, an LRU-evicted entry — still emits with
+ * full attribution but latency_us = 0 and an empty hostname, exactly like
+ * a duration_us = 0 file_rw event. */
+static __always_inline void
+emit_net_recv(struct sock *sk, struct msghdr *msg, __u64 bytes, bool is_udp)
+{
+	struct session_info info = {};
+	struct event_hdr *hdr;
+	struct ev_net_recv *ev;
+	unsigned char daddr[16] = {};
+	char host[MAX_HOSTNAME_LEN] = {};
+	__u64 sid = 0, cgid = 0, latency_us = 0;
+	__u32 tgid = cur_tgid();
+	__u16 family = 0, dport = 0;
+	__u8 proto = is_udp ? IPPROTO_UDP : IPPROTO_TCP;
+
+	if (!cfg_enabled(6))
+		return;
+	if (!resolve_scope(tgid, cur_task(), &sid, &info, &cgid))
+		return;
+	if (!net_dest(sk, msg, is_udp, true, daddr, &family, &dport))
+		return;
+	/* Consume this thread's send on this socket, if any. */
+	{
+		struct send_inflight_key key;
+		struct send_inflight_val *inflight;
+		__u64 now;
+
+		key.pid_tgid = bpf_get_current_pid_tgid();
+		key.sock = (unsigned long)sk;
+		inflight = bpf_map_lookup_elem(&send_inflight, &key);
+		if (inflight) {
+			now = bpf_ktime_get_ns();
+			if (now > inflight->send_ts_ns)
+				latency_us = (now - inflight->send_ts_ns) / 1000;
+			__builtin_memcpy(host, inflight->hostname,
+					 MAX_HOSTNAME_LEN);
+			bpf_map_delete_elem(&send_inflight, &key);
+		}
+	}
+	hdr = reserve_event(EVENT_NET_RECV, EVLEN_NET_RECV, sid, &info,
+			    cur_task(), tgid);
+	if (!hdr)
+		return;
+	ev = (struct ev_net_recv *)(void *)(hdr + 1);
+	ev->family = family;
+	ev->protocol = proto;
+	ev->sport = BPF_CORE_READ(sk, __sk_common.skc_num);
+	__builtin_memcpy(ev->daddr, daddr, 16);
+	if (family == AF_INET) {
+		__u32 saddr = BPF_CORE_READ(sk, __sk_common.skc_rcv_saddr);
+
+		__builtin_memcpy(ev->saddr, &saddr, 4);
+	} else {
+		struct in6_addr saddr6 = BPF_CORE_READ(sk, __sk_common.skc_v6_rcv_saddr);
+
+		__builtin_memcpy(ev->saddr, &saddr6, 16);
+	}
+	ev->dport = dport;
+	if (ev->dport == 53)
+		ev->flags |= 1; /* DNS */
+	ev->bytes = bytes;
+	ev->latency_us = latency_us;
+	__builtin_memcpy(ev->hostname, host, MAX_HOSTNAME_LEN);
+	submit_event(hdr, EVENT_NET_RECV);
+}
+
+/* fexit: at exit the return value (bytes received) is known. Short and
+ * failed calls (ret <= 0) are skipped — there is nothing to attribute.
+ * Declared as the 4-arg (sk, msg, len, flags) prefix: addr_len was removed
+ * from tcp/udp_recvmsg upstream, and declaring it makes the verifier reject
+ * the program on newer kernels ("doesn't have 6-th argument"). The prefix
+ * form also attaches on older kernels that still have addr_len. */
+SEC("fexit/tcp_recvmsg")
+int BPF_PROG(handle_tcp_recvmsg, struct sock *sk, struct msghdr *msg,
+	     size_t len, int flags, int ret)
+{
+	(void)msg;
+	(void)len;
+	(void)flags;
+	if (ret <= 0)
+		return 0;
+	emit_net_recv(sk, NULL, (__u64)ret, false);
+	return 0;
+}
+
+SEC("fexit/udp_recvmsg")
+int BPF_PROG(handle_udp_recvmsg, struct sock *sk, struct msghdr *msg,
+	     size_t len, int flags, int ret)
+{
+	(void)len;
+	(void)flags;
+	if (ret <= 0)
+		return 0;
+	emit_net_recv(sk, msg, (__u64)ret, true);
 	return 0;
 }
 

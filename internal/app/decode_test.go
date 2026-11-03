@@ -19,7 +19,8 @@ import (
 //   event_hdr 72 B, then one fixed-size payload per type.
 //   ev_exec 1560, ev_fork 8, ev_exit 32, ev_file_open 536, ev_file_unlink 520,
 //   ev_file_rename 1032, ev_file_chmod 528, ev_file_close 552,
-//   ev_file_rw 552, ev_net_connect 48, ev_net_send 112 (48 + hostname).
+//   ev_file_rw 552, ev_net_connect 48, ev_net_send 112 (48 + hostname),
+//   ev_net_recv 120 (48 + latency + hostname).
 
 func putStr(dst []byte, s string) { copy(dst, s) }
 
@@ -28,7 +29,7 @@ func buildRecord(typ uint16, flags uint16, payload []byte) []byte {
 	raw := make([]byte, 72+len(payload))
 	binary.LittleEndian.PutUint16(raw[0:2], typ)
 	binary.LittleEndian.PutUint16(raw[2:4], uint16(len(raw))) // hdr.size
-	binary.LittleEndian.PutUint16(raw[4:6], 7)                // ABI version
+	binary.LittleEndian.PutUint16(raw[4:6], 8)                // ABI version
 	binary.LittleEndian.PutUint16(raw[6:8], flags)
 	binary.LittleEndian.PutUint64(raw[8:16], 123456789) // ts_ns
 	binary.LittleEndian.PutUint64(raw[16:24], 42)       // session_id
@@ -82,6 +83,24 @@ func netPayload(family uint16) []byte {
 	return p
 }
 
+// netRecvPayload builds the 120-byte ABI v8 net_recv payload: the
+// first 48 bytes mirror the net_send layout, then latency_us (p[48:56])
+// pairing this recv with the thread's most recent send on the same
+// socket, and the paired send's hostname (p[56:120]).
+func netRecvPayload(latencyUS uint64, hostname string) []byte {
+	p := make([]byte, 120)
+	copy(p[0:4], net.ParseIP("93.184.216.34").To4())
+	copy(p[16:20], net.ParseIP("192.168.1.10").To4())
+	binary.LittleEndian.PutUint16(p[32:34], 443)
+	binary.LittleEndian.PutUint16(p[34:36], 54321)
+	binary.LittleEndian.PutUint16(p[36:38], 2)
+	p[38] = 6                                  // IPPROTO_TCP
+	binary.LittleEndian.PutUint64(p[40:48], 5) // bytes, not cumulative
+	binary.LittleEndian.PutUint64(p[48:56], latencyUS)
+	putStr(p[56:120], hostname)
+	return p
+}
+
 // netSendPayload builds the 112-byte ABI v7 net_send payload: the first
 // 40 bytes mirror netPayload's layout, bytes replaces the result tail,
 // and hostname (p[48:112]) carries the slice-4 DNS qname / TLS SNI.
@@ -92,7 +111,7 @@ func netSendPayload(hostname string) []byte {
 	binary.LittleEndian.PutUint16(p[32:34], 443)
 	binary.LittleEndian.PutUint16(p[34:36], 54321)
 	binary.LittleEndian.PutUint16(p[36:38], 2)
-	p[38] = 6 // IPPROTO_TCP
+	p[38] = 6                                  // IPPROTO_TCP
 	binary.LittleEndian.PutUint64(p[40:48], 5) // bytes, not cumulative
 	putStr(p[48:112], hostname)
 	return p
@@ -195,10 +214,10 @@ func TestDecodeValidEvents(t *testing.T) {
 			name: "exit",
 			raw: func() []byte {
 				p := make([]byte, 32)
-				binary.LittleEndian.PutUint32(p[0:4], 0x100)           // raw wait status for exit(1)
-				binary.LittleEndian.PutUint64(p[8:16], 12_500_000)     // cpu_user_ns -> 12 ms (floor)
-				binary.LittleEndian.PutUint64(p[16:24], 3_000_000)     // cpu_sys_ns -> 3 ms
-				binary.LittleEndian.PutUint64(p[24:32], 45678)         // max_rss_kb, KiB as-is
+				binary.LittleEndian.PutUint32(p[0:4], 0x100)       // raw wait status for exit(1)
+				binary.LittleEndian.PutUint64(p[8:16], 12_500_000) // cpu_user_ns -> 12 ms (floor)
+				binary.LittleEndian.PutUint64(p[16:24], 3_000_000) // cpu_sys_ns -> 3 ms
+				binary.LittleEndian.PutUint64(p[24:32], 45678)     // max_rss_kb, KiB as-is
 				return buildRecord(3, 0, p)
 			}(),
 			check: func(t *testing.T, d *Decoded) {
@@ -317,9 +336,9 @@ func TestDecodeValidEvents(t *testing.T) {
 				p := make([]byte, 552)
 				putStr(p[0:512], "/tmp/probe.txt")
 				binary.LittleEndian.PutUint64(p[512:520], 0xcafe)
-				binary.LittleEndian.PutUint64(p[520:528], 10) // bytes, not cumulative
+				binary.LittleEndian.PutUint64(p[520:528], 10)  // bytes, not cumulative
 				binary.LittleEndian.PutUint64(p[528:536], 777) // open_ts_ns
-				binary.LittleEndian.PutUint64(p[536:544], 42) // duration_us (slice 2b)
+				binary.LittleEndian.PutUint64(p[536:544], 42)  // duration_us (slice 2b)
 				p[544] = 1
 				return buildRecord(14, 0, p)
 			}(),
@@ -408,6 +427,31 @@ func TestDecodeValidEvents(t *testing.T) {
 			raw:  buildRecord(15, 0, netSendPayload("")),
 			check: func(t *testing.T, d *Decoded) {
 				assertField(t, d, "bytes", uint64(5))
+				assertNoField(t, d, "hostname")
+			},
+		},
+		{
+			name: "net_recv carries this call's bytes, latency and paired hostname",
+			raw:  buildRecord(16, 0, netRecvPayload(1234, "example.com")),
+			check: func(t *testing.T, d *Decoded) {
+				assertField(t, d, "daddr", "93.184.216.34")
+				assertField(t, d, "saddr", "192.168.1.10")
+				assertField(t, d, "dport", uint16(443))
+				assertField(t, d, "sport", uint16(54321))
+				assertField(t, d, "family", uint16(2))
+				assertField(t, d, "protocol", uint8(6))
+				assertField(t, d, "bytes", uint64(5))
+				assertField(t, d, "latency_us", uint64(1234))
+				assertField(t, d, "hostname", "example.com")
+				assertNoField(t, d, "dns")
+			},
+		},
+		{
+			name: "net_recv latency zero and empty hostname stay present-or-absent correctly",
+			raw:  buildRecord(16, 0, netRecvPayload(0, "")),
+			check: func(t *testing.T, d *Decoded) {
+				assertField(t, d, "bytes", uint64(5))
+				assertField(t, d, "latency_us", uint64(0))
 				assertNoField(t, d, "hostname")
 			},
 		},
@@ -551,7 +595,7 @@ func TestDecodeMalformed(t *testing.T) {
 		{"bad abi version 4", withVersion(buildRecord(2, 0, make([]byte, 8)), 4), "abi version 4"},
 		{"bad abi version 5", withVersion(buildRecord(2, 0, make([]byte, 8)), 5), "abi version 5"},
 		{"bad abi version 6", withVersion(buildRecord(2, 0, make([]byte, 8)), 6), "abi version 6"},
-		{"bad abi version 8", withVersion(buildRecord(2, 0, make([]byte, 8)), 8), "abi version 8"},
+		{"bad abi version 7", withVersion(buildRecord(2, 0, make([]byte, 8)), 7), "abi version 7"},
 		{"size below header", withSize(buildRecord(2, 0, make([]byte, 8)), 71), "bad record size 71"},
 		{"size zero", withSize(buildRecord(2, 0, make([]byte, 8)), 0), "bad record size 0"},
 		{"size beyond buffer", withSize(buildRecord(2, 0, make([]byte, 8)), 999), "bad record size 999"},
@@ -569,6 +613,8 @@ func TestDecodeMalformed(t *testing.T) {
 		{"file_write payload short", shortPayload(14, 551), "file_rw payload short"},
 		{"net_send payload short", shortPayload(15, 111), "net payload short"},
 		{"net_send v6 size rejected", shortPayload(15, 48), "net payload short"},
+		{"net_recv payload short", shortPayload(16, 119), "net payload short"},
+		{"net_recv v6 size rejected", shortPayload(16, 48), "net payload short"},
 		{"net payload short", shortPayload(10, 47), "net payload short"},
 		{"full record truncated mid-payload", full[:len(full)-1], "bad record size"},
 	}
@@ -661,9 +707,9 @@ func TestProcessorJSONPipeline(t *testing.T) {
 }
 
 func TestTypeNamesCoverKernelEvents(t *testing.T) {
-	// Every kernel event_type 1..15 plus the two
+	// Every kernel event_type 1..16 plus the two
 	// userspace-synthesised session types must have a JSONL name.
-	for typ := uint16(1); typ <= 15; typ++ {
+	for typ := uint16(1); typ <= 16; typ++ {
 		if typeNames[typ] == "" {
 			t.Errorf("typeNames[%d] missing", typ)
 		}
@@ -676,5 +722,8 @@ func TestTypeNamesCoverKernelEvents(t *testing.T) {
 	}
 	if fmt.Sprint(typeNames[15]) != "net_send" {
 		t.Errorf("typeNames[15] = %q", typeNames[15])
+	}
+	if fmt.Sprint(typeNames[16]) != "net_recv" {
+		t.Errorf("typeNames[16] = %q", typeNames[16])
 	}
 }
