@@ -237,7 +237,8 @@ func (l *Loader) setConfig(ioAccounting, syscallSummary, fileMutations, fileRWEv
 	// struct agentloupe_config: run_id, enable_syscall_summary,
 	// enable_file_io_accounting, enable_file_mutations, net_udp_only,
 	// enable_file_rw_events, enable_net_send_events (header order).
-	// 32 bytes, fully used since ABI v6 (slot 6 took the tail pad).
+	// 32 bytes, fully used since ABI v6 (slot 6 took the tail pad;
+	// slice 4 reuses slot 6 for the hostname parser, unchanged in v7).
 	binary.LittleEndian.PutUint32(val[8:12], boolToU32(syscallSummary))
 	binary.LittleEndian.PutUint32(val[12:16], boolToU32(ioAccounting))
 	binary.LittleEndian.PutUint32(val[16:20], boolToU32(fileMutations))

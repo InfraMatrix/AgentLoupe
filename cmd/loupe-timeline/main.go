@@ -52,6 +52,7 @@ type rawEvent struct {
 	Daddr        string                       `json:"daddr"`
 	Dport        uint16                       `json:"dport"`
 	DNS          bool                         `json:"dns"`
+	Hostname     string                       `json:"hostname"`
 	Protocol     uint8                        `json:"protocol"`
 	Counts       map[string]uint64            `json:"counts"`
 	PerProcess   map[string]map[string]uint64 `json:"per_process_counts"`
@@ -158,11 +159,14 @@ type PathStat struct {
 }
 
 type NetStat struct {
-	Dest      string `json:"dest"`
-	Count     int    `json:"count"`
-	DNS       int    `json:"dns_count"`
-	Sends     int    `json:"sends,omitempty"`
-	SentBytes uint64 `json:"sent_bytes,omitempty"`
+	Dest      string   `json:"dest"`
+	Count     int      `json:"count"`
+	DNS       int      `json:"dns_count"`
+	Sends     int      `json:"sends,omitempty"`
+	SentBytes uint64   `json:"sent_bytes,omitempty"`
+	// Hostnames seen on this destination's sends (DNS qnames, TLS
+	// SNIs), unique, first-seen order, capped: enrichment, not a log.
+	Hostnames []string `json:"hostnames,omitempty"`
 }
 
 type SeriesBucket struct {
@@ -489,6 +493,14 @@ func (b *builder) add(ev *rawEvent) {
 			if ev.DNS {
 				detail += " (DNS)"
 			}
+			// A name learned from an earlier send to this dest
+			// (DNS-before-connect) annotates the connect marker.
+			// SNI arrives after its connect, so it only ever lands
+			// on the per-dest entry and later markers — never
+			// backfilled here.
+			if len(ns.Hostnames) > 0 {
+				detail += fmt.Sprintf(" (%s)", strings.Join(ns.Hostnames, ","))
+			}
 			s.addMarker(&Marker{Ts: ev.Ts, Type: "net_connect", PID: ev.PID, Detail: detail})
 		}
 	case "net_send":
@@ -503,6 +515,18 @@ func (b *builder) add(ev *rawEvent) {
 		// without changing what Count means.
 		ns.Sends++
 		ns.SentBytes += ev.Bytes
+		if ev.Hostname != "" {
+			known := false
+			for _, h := range ns.Hostnames {
+				if h == ev.Hostname {
+					known = true
+					break
+				}
+			}
+			if !known && len(ns.Hostnames) < 8 {
+				ns.Hostnames = append(ns.Hostnames, ev.Hostname)
+			}
+		}
 		if hasTS {
 			detail := dest
 			if pn := protoName(ev.Protocol); pn != "" {
@@ -511,6 +535,9 @@ func (b *builder) add(ev *rawEvent) {
 			detail += fmt.Sprintf(" (%d bytes)", ev.Bytes)
 			if ev.DNS {
 				detail += " (DNS)"
+			}
+			if ev.Hostname != "" {
+				detail += fmt.Sprintf(" %s", ev.Hostname)
 			}
 			s.addMarker(&Marker{Ts: ev.Ts, Type: "net_send", PID: ev.PID, Detail: detail})
 		}

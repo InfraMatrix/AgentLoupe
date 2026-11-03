@@ -89,7 +89,9 @@ Opt-in probes (off by default):
                            # (ABI v5: this call's size + timestamps only;
                            # works without --enable-io-accounting)
 --enable-net-send-events   # discrete net_send event per tcp/udp_sendmsg call
-                           # (ABI v6: this call's bytes + destination)
+                           # (ABI v7: this call's bytes + destination +
+                           # hostname — DNS qname / TLS SNI parsed from
+                           # the send buffer; empty when it holds no name)
 ```
 
 ### Try the demo (one command)
@@ -255,10 +257,25 @@ the socket. TCP destinations always come from the sock; unconnected UDP
 sends carry a per-call destination parsed from the message (connected
 UDP falls back to the sock). Same volume warning as the rw events: this
 fires on every send a tracked process makes. The events land in the
-timeline as per-destination markers (with byte counts) and in the
-scorecard as `net_sends`/`net_sent_bytes` totals (per-destination send
-volume stays in the timeline's net entries). No per-call latency field:
+timeline as per-destination markers (with byte counts and hostnames) and
+in the scorecard as `net_sends`/`net_sent_bytes` totals plus a sorted
+unique `hostnames` list (per-destination send volume and per-dest
+hostnames stay in the timeline's net entries). No per-call latency field:
 slice 3 is attribution first.
+
+`hostname` (ABI v7) is the DNS query name for UDP sends and the TLS
+ClientHello SNI for TCP sends, parsed from **this call's** send buffer at
+`sys_enter` (where the buffer pointers are stable) and paired with the
+send at its `fexit`. Parsing is strict: single-question queries with
+plain labels only, well-formed ClientHellos walked to `server_name`, the
+whole name fitting in 63 characters. Anything else — raw TCP/UDP
+payloads, over-long names, a missed enter probe — yields an **empty**
+hostname, never a dropped event. A name learned from an earlier send to
+the same destination (e.g. DNS-before-connect) also annotates that
+destination's `net_connect` markers in the timeline; SNI arrives after
+its connect, so it is never backfilled there. Two known gaps: `sendmmsg`
+batches share the first datagram's parse, and only `iov[0]` of a
+`sendmsg` is inspected.
 
 ### Session lifecycle: `root_exit` and orphans
 
@@ -302,7 +319,9 @@ Useful loader flags: `--drop-path-prefix /proc/` (repeatable) suppresses
 file-event noise (e.g. agents polling their own `/proc/<pid>/stat`);
 `session_end` events carry `cpu_user_ms`/`cpu_sys_ms` (session root
 process CPU, sampled from `/proc`). Network events cover TCP and UDP;
-connects to port 53 are flagged `"dns": true` (no payload parsing).
+connects to port 53 are flagged `"dns": true`, and with
+`--enable-net-send-events` the send's `hostname` carries the parsed DNS
+query name (UDP) or TLS SNI (TCP) — empty when the buffer holds no name.
 Paths/argv are captured up to 512 bytes (ABI v4); `comm` remains capped
 at 16 chars by the kernel (`TASK_COMM_LEN`) — use exec `filename`/`argv`
 to disambiguate. `--force-tracepoint-mode` forces the tracepoint

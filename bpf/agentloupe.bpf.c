@@ -836,6 +836,15 @@ static __always_inline int pending_finish(long ret, __u32 op)
 #define NR_openat2 437
 #endif
 
+/* Slice 4 send syscalls (x86_64; same arch assumption as above). Plain
+ * send() is libc sugar over sendto, so these three cover every send path;
+ * recvmmsg has no send-side twin to worry about. */
+#ifndef NR_sendto
+#define NR_sendto 44
+#define NR_sendmsg 46
+#define NR_sendmmsg 307
+#endif
+
 struct sys_raw_args {
 	__u64 args[2]; /* (struct pt_regs *regs, long id_or_ret) */
 };
@@ -1232,6 +1241,315 @@ int handle_enter_connect(struct sys_enter_ctx *ctx)
 	return 0;
 }
 
+/* Slice 4: send-buffer hostnames (DNS qname / TLS SNI) for net_send.
+ *
+ * The fexit side (emit_net_send below) sees kernel iov_iter state whose
+ * layout is CO-RE-fragile across kernels, so parsing happens here at
+ * raw_tp/sys_enter, where the syscall's buffer arguments are stable
+ * userspace pointers: the direct buf for sendto, iov[0] of the user
+ * msghdr for sendmsg, and the first datagram's msghdr for sendmmsg
+ * (batched datagrams past the first share its hostname — documented in
+ * the map comment in agentloupe.h). send() is libc sugar over sendto,
+ * so syscalls 44/46/307 cover every send path on x86_64.
+ *
+ * The parse result is stashed in snd_hostnames keyed on pid_tgid and
+ * consumed + deleted by the matching fexit; a thread runs one send at a
+ * time, so each fexit consumes exactly its own enter's parse. Either
+ * parser failing — or the buffer holding no parseable name — yields an
+ * empty hostname, never a dropped event: validation degrades to
+ * unattributed, not to lost. The parsed name is DNS-only for SOCK_DGRAM
+ * and SNI-only for SOCK_STREAM, which kills the false positives (raw UDP
+ * payloads are never TLS-parsed, raw TCP payloads never DNS-parsed).
+ * Both parsers are __always_inline with int (0/1) returns: as __noinline
+ * bool subprograms the verifier rejected handle_send_enter with
+ * "cannot return stack pointer to the caller" (the store-address temp
+ * in R0 merges with the 1-byte bool return at the shared epilogue).
+ * There is a single caller, so inlining costs nothing extra, and the
+ * combined frame (288B parse window + 64B name + parser locals) stays
+ * well under the 512B stack limit.
+ *
+ * SND_PARSE_MAX covers the longest storable DNS name (12B header +
+ * bounded qname + trailer: a longer qname can never fit whole in the
+ * event, so copying past this window is pointless) and typical
+ * ClientHello SNI offsets; a deeper SNI parses to empty. */
+#define SND_PARSE_MAX 288
+
+/* DNS query name (SOCK_DGRAM buffers only). Strict: QR == 0 (responses
+ * are not queries, even when they echo a single question), one question
+ * (QDCOUNT == 1), no answer/authority/additional sections, plain labels
+ * (no compression pointers — those belong to responses), label bytes
+ * [A-Za-z0-9_-], whole dotted name fitting with its NUL. Anything else —
+ * including the root query, which names nothing — returns false. */
+/* Stack stores use idx & 63 (a runtime no-op under the proven bounds):
+ * the verifier tracks olen and j as independent ranges, so without the
+ * mask it cannot prove the variable-offset write in-bounds (cf.
+ * path_via_walk's & 511). */
+static __always_inline int parse_dns_qname(const unsigned char *buf, __u32 n, char *out)
+{
+	__u32 off = 12, olen = 0;
+	int done = 0, ok = 1;
+	int i, j;
+
+	if (n > SND_PARSE_MAX) /* belt and braces: the caller caps this */
+		return 0;
+	if (n < 17) /* header + root qname + qtype/qclass */
+		return 0;
+	if (buf[2] & 0x80) /* QR: a response is not a query */
+		return 0;
+	if (buf[4] != 0 || buf[5] != 1) /* QDCOUNT == 1 */
+		return 0;
+	if (buf[6] || buf[7] || buf[8] || buf[9] || buf[10] || buf[11])
+		return 0; /* a query carries no answer/auth/additional */
+	for (i = 0; i < 32; i++) { /* 32 labels is past any real qname */
+		unsigned char L;
+
+		if (off >= n) {
+			ok = 0;
+			break;
+		}
+		L = buf[off];
+		if (L == 0) {
+			off++;
+			done = 1;
+			break;
+		}
+		if (L & 0xC0) { /* compression pointer: not a query name */
+			ok = 0;
+			break;
+		}
+		if (L > 63 || off + 1 + (__u32)L > n) {
+			ok = 0;
+			break;
+		}
+		if (olen + (__u32)L + 1 > MAX_HOSTNAME_LEN - 1) {
+			ok = 0; /* would not fit whole: leave empty */
+			break;
+		}
+		for (j = 0; j < 63; j++) {
+			char c;
+
+			if ((__u32)j >= (__u32)L)
+				break;
+			c = (char)buf[off + 1 + (__u32)j];
+			if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+			      (c >= '0' && c <= '9') || c == '-' || c == '_')) {
+				ok = 0;
+				break;
+			}
+			out[(olen + (__u32)j) & (MAX_HOSTNAME_LEN - 1)] = c;
+		}
+		if (!ok)
+			break;
+		off += 1 + (__u32)L;
+		olen += (__u32)L;
+		out[olen & (MAX_HOSTNAME_LEN - 1)] = '.';
+		olen++;
+	}
+	if (!ok || !done)
+		return 0;
+	if (off + 4 > n) /* qtype + qclass must be present */
+		return 0;
+	if (olen == 0) /* root query: names nothing */
+		return 0;
+	out[(olen - 1) & (MAX_HOSTNAME_LEN - 1)] = '\0'; /* trailing dot -> terminator */
+	return 1;
+}
+
+/* TLS ClientHello SNI (SOCK_STREAM buffers only). Strict: handshake
+ * record, client_hello, every length field validated against the record
+ * before it is trusted, extensions walked to server_name, first host_name
+ * entry copied when 1..63 bytes of [A-Za-z0-9.-]. Raw (non-TLS) TCP
+ * payloads fail the record/hello checks and parse to empty. */
+/* The copy store uses j & 63 (a runtime no-op: j < name_len <= 63) so the
+ * verifier sees a bounded stack write (see parse_dns_qname). */
+static __always_inline int parse_tls_sni(const unsigned char *buf, __u32 n, char *out)
+{
+	__u32 rec_len, hs_len, pos, ext_end, elen32, list32, nm_len32;
+	__u16 etype, elen, list_len, name_len;
+	int found = 0, ok = 1;
+	int i, j;
+
+	if (n > SND_PARSE_MAX) /* belt and braces: the caller caps this */
+		return 0;
+	if (n < 52) /* record + hs hdr + version + random + min rest */
+		return 0;
+	if (buf[0] != 0x16) /* TLS handshake record */
+		return 0;
+	rec_len = ((__u32)buf[3] << 8) | buf[4];
+	if (rec_len < 46 || 5 + rec_len > n)
+		return 0; /* record must end inside this send */
+	if (buf[5] != 0x01) /* client_hello */
+		return 0;
+	hs_len = ((__u32)buf[6] << 16) | ((__u32)buf[7] << 8) | buf[8];
+	if (4 + hs_len > rec_len)
+		return 0;
+	pos = 5 + 4 + 2 + 32; /* record + hs headers, version, random */
+	if (pos >= 5 + rec_len)
+		return 0;
+	pos += 1 + buf[pos]; /* session_id */
+	if (pos + 2 > 5 + rec_len)
+		return 0;
+	elen = ((__u16)buf[pos] << 8) | buf[pos + 1]; /* cipher_suites */
+	pos += 2 + elen;
+	if (pos + 1 > 5 + rec_len)
+		return 0;
+	pos += 1 + buf[pos]; /* compression_methods */
+	if (pos + 2 > 5 + rec_len)
+		return 0;
+	elen = ((__u16)buf[pos] << 8) | buf[pos + 1]; /* extensions */
+	pos += 2;
+	ext_end = pos + elen;
+	if (ext_end > 5 + rec_len)
+		return 0;
+	for (i = 0; i < 16; i++) { /* past any real extension count */
+		if (pos + 4 > ext_end)
+			break;
+		etype = ((__u16)buf[pos] << 8) | buf[pos + 1];
+		elen = ((__u16)buf[pos + 2] << 8) | buf[pos + 3];
+		elen32 = elen;
+		if (pos + 4 + elen32 > ext_end) {
+			ok = 0;
+			break;
+		}
+		if (etype != 0) { /* not server_name: skip */
+			pos += 4 + elen32;
+			continue;
+		}
+		/* server_name: list_len + entries of (type, len, name). */
+		if (elen32 < 6) { /* list_len + smallest host_name entry */
+			ok = 0;
+			break;
+		}
+		if (pos + 6 > ext_end) { /* list_len bytes must be in-bounds */
+			ok = 0;
+			break;
+		}
+		list_len = ((__u16)buf[pos + 4] << 8) | buf[pos + 5];
+		list32 = list_len;
+		if (2 + list32 > elen32) {
+			ok = 0;
+			break;
+		}
+		pos += 6; /* first entry */
+		if (pos + 3 > ext_end) { /* type + len bytes in-bounds */
+			ok = 0;
+			break;
+		}
+		if (buf[pos] != 0) { /* host_name */
+			ok = 0;
+			break;
+		}
+		name_len = ((__u16)buf[pos + 1] << 8) | buf[pos + 2];
+		if (name_len == 0 || name_len > MAX_HOSTNAME_LEN - 1) {
+			ok = 0;
+			break;
+		}
+		nm_len32 = name_len;
+		if (3 + nm_len32 > list32) { /* entry fits its list */
+			ok = 0;
+			break;
+		}
+		for (j = 0; j < MAX_HOSTNAME_LEN - 1; j++) {
+			char c;
+
+			if ((__u32)j >= nm_len32)
+				break;
+			c = (char)buf[pos + 3 + (__u32)j];
+			if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+			      (c >= '0' && c <= '9') || c == '-' || c == '.')) {
+				ok = 0;
+				break;
+			}
+			out[(__u32)j & (MAX_HOSTNAME_LEN - 1)] = c;
+		}
+		if (!ok)
+			break;
+		out[nm_len32 & (MAX_HOSTNAME_LEN - 1)] = '\0';
+		found = 1;
+		break;
+	}
+	if (!ok)
+		return 0;
+	return found;
+}
+
+/* Sys_enter for sendto/sendmsg/sendmmsg: parse this call's buffer for a
+ * DNS qname (DGRAM) or TLS SNI (STREAM) and stash it for the fexit.
+ * Gated on slot 6 (same flag as net_send itself: no sends, no hostnames)
+ * and on scope BEFORE the fd-table walk, so untracked processes cost two
+ * map lookups and nothing else. Always overwrites the thread's entry —
+ * even with an empty name — so a raw-payload send can never inherit a
+ * previous send's hostname. */
+SEC("raw_tp/sys_enter")
+int handle_send_enter(struct sys_raw_args *ctx)
+{
+	struct pt_regs *regs = (struct pt_regs *)(unsigned long)ctx->args[0];
+	long nr = (long)ctx->args[1];
+	struct snd_hostname host = {};
+	unsigned char kbuf[SND_PARSE_MAX];
+	const void *ubuf = NULL;
+	__u64 pid_tgid, si, ulen = 0;
+	__u32 n = 0;
+	int stype;
+
+	if (!regs)
+		return 0;
+	if (nr != NR_sendto && nr != NR_sendmsg && nr != NR_sendmmsg)
+		return 0;
+	if (!cfg_enabled(6))
+		return 0;
+	if (!tracked_sid(cur_tgid(), NULL))
+		return 0;
+	si = BPF_CORE_READ(regs, si);
+	/* SOCK_STREAM / SOCK_DGRAM only: anything else (raw, seqpacket)
+	 * has no sendmsg fexit to consume a parse, so skip the work. */
+	stype = socket_type_from_fd((int)BPF_CORE_READ(regs, di));
+	if (stype != 1 && stype != 2)
+		return 0;
+	if (nr == NR_sendto) {
+		ubuf = (const void *)(unsigned long)si;
+		ulen = BPF_CORE_READ(regs, dx);
+	} else {
+		/* sendmsg: user msghdr at si; sendmmsg: first mmsghdr's
+		 * msg_hdr at the same offset (identical layout: name,
+		 * namelen, iov, iovlen). Only iov[0] is parsed — the
+		 * ClientHello / DNS query lives there in practice. */
+		__u64 iov_ptr = 0, iovlen = 0, base = 0, blen = 0;
+
+		if (bpf_probe_read_user(&iov_ptr, sizeof(iov_ptr),
+					(const void *)(unsigned long)(si + 16)) < 0)
+			goto store;
+		if (bpf_probe_read_user(&iovlen, sizeof(iovlen),
+					(const void *)(unsigned long)(si + 24)) < 0)
+			goto store;
+		if (iovlen < 1 || !iov_ptr)
+			goto store;
+		if (bpf_probe_read_user(&base, sizeof(base),
+					(const void *)(unsigned long)iov_ptr) < 0)
+			goto store;
+		if (bpf_probe_read_user(&blen, sizeof(blen),
+					(const void *)(unsigned long)(iov_ptr + 8)) < 0)
+			goto store;
+		if (!base || !blen)
+			goto store;
+		ubuf = (const void *)(unsigned long)base;
+		ulen = blen;
+	}
+	if (ubuf && ulen) {
+		n = ulen > SND_PARSE_MAX ? SND_PARSE_MAX : (__u32)ulen;
+		if (n > 0 && bpf_probe_read_user(kbuf, n, ubuf) == 0) {
+			if (stype == 2)
+				parse_dns_qname(kbuf, n, host.name);
+			else
+				parse_tls_sni(kbuf, n, host.name);
+		}
+	}
+store:
+	pid_tgid = bpf_get_current_pid_tgid();
+	bpf_map_update_elem(&snd_hostnames, &pid_tgid, &host, BPF_ANY);
+	return 0;
+}
+
 /* Slice 3: one discrete event per tcp/udp_sendmsg call on a tracked
  * socket, carrying this call's byte count and destination — the
  * network-side equivalent of slice 2a. Opt-in via enable_net_send_events
@@ -1263,12 +1581,18 @@ emit_net_send(struct sock *sk, struct msghdr *msg, __u64 bytes, bool is_udp)
 	if (!resolve_scope(tgid, cur_task(), &sid, &info, &cgid))
 		return;
 	if (is_udp && msg) {
-		/* Unconnected send: the destination is per-call. */
+		/* Unconnected send: the destination is per-call. At fexit,
+		 * msg is the kernel's struct msghdr: ___sys_sendmsg /
+		 * __sys_sendto copy the sockaddr onto the kernel stack and
+		 * rewrite msg_name to point at that kernel copy, so this
+		 * must be a _kernel read, not _user (the _user read fails
+		 * and the event degrades to the unconnected sock's
+		 * 0.0.0.0:0). */
 		if (BPF_CORE_READ(msg, msg_namelen) != 0) {
 			const void *name = BPF_CORE_READ(msg, msg_name);
 			unsigned char sa[28] = {};
 
-			if (name && bpf_probe_read_user(sa, sizeof(sa), name) == 0) {
+			if (name && bpf_probe_read_kernel(sa, sizeof(sa), name) == 0) {
 				__u16 f = (__u16)sa[0] | ((__u16)sa[1] << 8);
 
 				if (f == AF_INET) {
@@ -1322,6 +1646,19 @@ emit_net_send(struct sock *sk, struct msghdr *msg, __u64 bytes, bool is_udp)
 	if (ev->dport == 53)
 		ev->flags |= 1; /* DNS */
 	ev->bytes = bytes;
+	/* Slice 4: consume this thread's sys_enter parse, if any. The
+	 * reservation zero-fills hostname, so a miss (enter skipped,
+	 * degraded, or never attached) simply leaves it empty. */
+	{
+		__u64 tgid_pid = bpf_get_current_pid_tgid();
+		struct snd_hostname *h;
+
+		h = bpf_map_lookup_elem(&snd_hostnames, &tgid_pid);
+		if (h) {
+			__builtin_memcpy(ev->hostname, h->name, MAX_HOSTNAME_LEN);
+			bpf_map_delete_elem(&snd_hostnames, &tgid_pid);
+		}
+	}
 	submit_event(hdr, EVENT_NET_SEND);
 }
 

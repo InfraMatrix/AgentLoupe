@@ -56,7 +56,7 @@
 #ifndef AGENTLOUPE_H
 #define AGENTLOUPE_H
 
-#define AGENTLOUPE_ABI_VERSION 6
+#define AGENTLOUPE_ABI_VERSION 7
 
 /* Minimum kernel for full (LSM) mode; the loader enforces this, the
  * header only documents it. Fallback floor is 5.8. */
@@ -72,6 +72,7 @@
 #define MAX_FILE_INFOS       16384  /* struct file * -> fd_info (LRU)     */
 #define MAX_SYSCALL_COUNTS   65536  /* (session, tgid, nr) counters (LRU): ~64 sessions x 32 procs x 32 nrs */
 #define MAX_IN_FLIGHT_RW     4096   /* (pid_tgid, file) entry timestamps for rw latency (LRU) */
+#define MAX_SND_HOSTNAMES    4096   /* pid_tgid -> parsed DNS/SNI name, consumed per send (LRU) */
 #define RINGBUF_BYTES        (8 * 1024 * 1024)
 
 /* ---- Fixed string sizes (truncation is flagged, never silent) ---------- */
@@ -80,6 +81,10 @@
 #define MAX_PATH_LEN         512    /* file paths, exec filename, cwd     */
 #define MAX_ARGV_LEN         512    /* NUL-joined argv, exec events only  */
 #define MAX_ARGV_ARGS        16     /* argv entries copied at most        */
+#define MAX_HOSTNAME_LEN       64     /* DNS qname / TLS SNI per net_send
+                                      * (ABI v7): complete dotted name plus
+                                      * NUL; names that do not fit whole are
+                                      * left empty, never truncated         */
 
 /* Bounded dentry walk for the tracepoint fallback (scope.h). At the cap,
  * the path is emitted partial (leading components dropped) with
@@ -484,13 +489,18 @@ struct ev_file_rw {
 
 /*
  * One send(2)/sendto(2)/sendmsg(2)-class call on a tracked socket
- * (ABI v6, opt-in via enable_net_send_events). bytes is THIS call's
- * return value (ret > 0; short/failed calls are skipped at the fexit,
- * like account_io's ret <= 0 skip), not a cumulative total. The first
- * 40 bytes are laid out exactly like ev_net_connect (addrs, ports,
- * family, protocol, flags) so the decoder shares its parsing; bytes
- * replaces connect's result/_pad2 tail (sends have no errno to report —
- * only successful calls emit). No per-call latency: slice 3 is the
+ * (ABI v6, opt-in via enable_net_send_events; ABI v7 adds hostname).
+ * bytes is THIS call's return value (ret > 0; short/failed calls are
+ * skipped at the fexit, like account_io's ret <= 0 skip), not a
+ * cumulative total. The first 40 bytes are laid out exactly like
+ * ev_net_connect (addrs, ports, family, protocol, flags) so the decoder
+ * shares its parsing; bytes replaces connect's result/_pad2 tail (sends
+ * have no errno to report — only successful calls emit). hostname is the
+ * DNS query name (SOCK_DGRAM sends) or TLS ClientHello SNI (SOCK_STREAM
+ * sends) parsed from THIS call's send buffer at sys_enter by slice 4's
+ * handle_send_enter and consumed here; empty when the buffer held no
+ * parseable name (raw TCP/UDP payloads), when the name did not fit whole,
+ * or when the enter probe missed. No per-call latency: slices 3/4 are the
  * network-side equivalent of slice 2a (attribution first).
  */
 struct ev_net_send {
@@ -502,7 +512,8 @@ struct ev_net_send {
 	__u8  protocol;                   /* IPPROTO_TCP / UDP                 */
 	__u8  flags;                      /* bit0: DNS (dport 53)              */
 	__u64 bytes;                      /* this call's byte count (ret)      */
-};                                        /* 48 bytes                          */
+	char  hostname[MAX_HOSTNAME_LEN]; /* DNS qname / TLS SNI, or empty     */
+};                                        /* 112 bytes                         */
 
 struct ev_net_connect {
 	__u8  daddr[16];                  /* IPv4 in first 4 bytes if family=2 */
@@ -541,7 +552,7 @@ _Static_assert(sizeof(struct ev_file_open) == 536, "ev_file_open ABI changed");
 _Static_assert(sizeof(struct ev_file_chmod) == 528, "ev_file_chmod ABI changed");
 _Static_assert(sizeof(struct ev_file_close) == 552, "ev_file_close ABI changed");
 _Static_assert(sizeof(struct ev_file_rw) == 552, "ev_file_rw ABI changed");
-_Static_assert(sizeof(struct ev_net_send) == 48, "ev_net_send ABI changed");
+_Static_assert(sizeof(struct ev_net_send) == 112, "ev_net_send ABI changed");
 _Static_assert(sizeof(struct agentloupe_config) == 32, "agentloupe_config ABI changed");
 _Static_assert(sizeof(struct session_info) == 88, "session_info ABI changed");
 _Static_assert(sizeof(struct tracked_session) == 8, "tracked_session ABI changed");
@@ -699,6 +710,30 @@ struct {
 	__type(key, struct rw_inflight_key);
 	__type(value, __u64);              /* bpf_ktime_get_ns() at entry       */
 } rw_inflight SEC(".maps");
+
+/* Parsed send-buffer hostname per thread, for slice 4 (ABI v7). Written
+ * by the raw_tp/sys_enter probe (handle_send_enter), which sees the
+ * stable userspace buffer pointers, and consumed + deleted by the
+ * tcp/udp_sendmsg fexit (emit_net_send) that attributes the same call.
+ * Keyed on the full pid_tgid: a thread runs one send syscall at a time,
+ * so each fexit consumes exactly its own enter's parse. LRU is correct:
+ * an evicted or otherwise missing entry just yields an empty hostname
+ * on that event — degraded attribution, never a lost event. The entry is
+ * ALWAYS overwritten per in-scope send (even with an empty name), so a
+ * raw-payload send can never inherit a previous send's hostname; the one
+ * known gap is sendmmsg batches, whose per-datagram fexits share the
+ * thread's most recent parse (only the first datagram is parsed at
+ * enter). 64 bytes: no size assert needed (value only, never on the
+ * ring). */
+struct snd_hostname {
+	char name[MAX_HOSTNAME_LEN];
+};
+struct {
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
+	__uint(max_entries, MAX_SND_HOSTNAMES);
+	__type(key, __u64);               /* bpf_get_current_pid_tgid()        */
+	__type(value, struct snd_hostname);
+} snd_hostnames SEC(".maps");
 
 /* The single output channel. */
 struct {

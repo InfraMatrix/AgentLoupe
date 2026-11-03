@@ -28,6 +28,7 @@ type event struct {
 	Daddr        string   `json:"daddr"`
 	Dport        uint16   `json:"dport"`
 	DNS          bool     `json:"dns"`
+	Hostname     string   `json:"hostname"`
 	Protocol     uint8    `json:"protocol"`
 	ReadB        uint64   `json:"read_bytes"`
 	WriteB       uint64   `json:"write_bytes"`
@@ -61,6 +62,10 @@ type scorecard struct {
 	DNS        int     `json:"dns_connects"`
 	Sends      int     `json:"net_sends"`
 	SentBytes  uint64  `json:"net_sent_bytes"`
+	// Hostnames seen on this session's sends (DNS qnames, TLS SNIs),
+	// sorted, unique: which names the agent looked up or connected to
+	// by name. Empty when no send carried a parseable name.
+	Hostnames  []string `json:"hostnames,omitempty"`
 	CPUUserMS  uint64  `json:"cpu_user_ms,omitempty"`
 	CPUSysMS   uint64  `json:"cpu_sys_ms,omitempty"`
 	RootExit   string  `json:"root_exit,omitempty"`
@@ -76,6 +81,7 @@ type scorecard struct {
 	rootExitT        time.Time
 	sessionEndT      time.Time
 	paths            map[string]bool
+	hosts            map[string]bool
 	comms, dirs, net map[string]int
 }
 
@@ -106,7 +112,8 @@ func summarize(events []event) []*scorecard {
 		s, ok := byID[ev.SessionID]
 		if !ok {
 			s = &scorecard{SessionID: ev.SessionID, Agent: ev.AgentName,
-				paths: map[string]bool{}, comms: map[string]int{},
+				paths: map[string]bool{}, hosts: map[string]bool{},
+				comms: map[string]int{},
 				dirs: map[string]int{}, net: map[string]int{}}
 			byID[ev.SessionID] = s
 			order = append(order, s)
@@ -168,9 +175,13 @@ func summarize(events []event) []*scorecard {
 			s.net[fmt.Sprintf("%s:%d", ev.Daddr, ev.Dport)]++
 		case "net_send":
 			// Count calls and bytes; per-dest send volume stays in
-			// the timeline's net entries, not here.
+			// the timeline's net entries, not here. Hostnames feed
+			// the session's sorted unique list below.
 			s.Sends++
 			s.SentBytes += ev.Bytes
+			if ev.Hostname != "" {
+				s.hosts[ev.Hostname] = true
+			}
 		case "root_exit":
 			if s.rootExitT.IsZero() {
 				s.rootExitT = ts
@@ -197,6 +208,10 @@ func summarize(events []event) []*scorecard {
 			}
 		}
 		s.UniqPaths = len(s.paths)
+		for h := range s.hosts {
+			s.Hostnames = append(s.Hostnames, h)
+		}
+		sort.Strings(s.Hostnames)
 		s.TopComms = top(s.comms, 5)
 		s.TopDirs = top(s.dirs, 5)
 		s.Net = top(s.net, 10)
@@ -244,8 +259,8 @@ func main() {
 		fmt.Printf("%-22s %-10d %7.1fs %6d %6d %7d %7d %9d %9d %5d %d+%d\n",
 			trunc(s.Agent, 22), s.SessionID%10000000000, s.DurationS, s.Execs, s.Forks,
 			s.Opens, s.UniqPaths, s.ReadBytes, s.WriteBytes, s.Connects, s.CPUUserMS, s.CPUSysMS)
-		fmt.Printf("    comms=%v dirs=%v net=%v dns=%d sends=%d sent_bytes=%d mutations=%d reads=%d writes=%d\n",
-			s.TopComms, s.TopDirs, s.Net, s.DNS, s.Sends, s.SentBytes, s.Mutations, s.Reads, s.Writes)
+		fmt.Printf("    comms=%v dirs=%v net=%v dns=%d sends=%d sent_bytes=%d hosts=%v mutations=%d reads=%d writes=%d\n",
+			s.TopComms, s.TopDirs, s.Net, s.DNS, s.Sends, s.SentBytes, s.Hostnames, s.Mutations, s.Reads, s.Writes)
 		if s.RootExit != "" {
 			fmt.Printf("    root_exit=%s orphan_gap=%.1fs end_reason=%s still_running=%v\n",
 				s.RootExit, s.OrphanGapS, s.SessionEndReason, s.StillRunning)

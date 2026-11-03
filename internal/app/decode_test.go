@@ -19,7 +19,7 @@ import (
 //   event_hdr 72 B, then one fixed-size payload per type.
 //   ev_exec 1560, ev_fork 8, ev_exit 32, ev_file_open 536, ev_file_unlink 520,
 //   ev_file_rename 1032, ev_file_chmod 528, ev_file_close 552,
-//   ev_file_rw 552, ev_net_connect 48, ev_net_send 48.
+//   ev_file_rw 552, ev_net_connect 48, ev_net_send 112 (48 + hostname).
 
 func putStr(dst []byte, s string) { copy(dst, s) }
 
@@ -28,7 +28,7 @@ func buildRecord(typ uint16, flags uint16, payload []byte) []byte {
 	raw := make([]byte, 72+len(payload))
 	binary.LittleEndian.PutUint16(raw[0:2], typ)
 	binary.LittleEndian.PutUint16(raw[2:4], uint16(len(raw))) // hdr.size
-	binary.LittleEndian.PutUint16(raw[4:6], 6)                // ABI version
+	binary.LittleEndian.PutUint16(raw[4:6], 7)                // ABI version
 	binary.LittleEndian.PutUint16(raw[6:8], flags)
 	binary.LittleEndian.PutUint64(raw[8:16], 123456789) // ts_ns
 	binary.LittleEndian.PutUint64(raw[16:24], 42)       // session_id
@@ -79,6 +79,22 @@ func netPayload(family uint16) []byte {
 	binary.LittleEndian.PutUint16(p[34:36], 54321) // sport
 	binary.LittleEndian.PutUint16(p[36:38], family)
 	p[38] = 6 // IPPROTO_TCP
+	return p
+}
+
+// netSendPayload builds the 112-byte ABI v7 net_send payload: the first
+// 40 bytes mirror netPayload's layout, bytes replaces the result tail,
+// and hostname (p[48:112]) carries the slice-4 DNS qname / TLS SNI.
+func netSendPayload(hostname string) []byte {
+	p := make([]byte, 112)
+	copy(p[0:4], net.ParseIP("93.184.216.34").To4())
+	copy(p[16:20], net.ParseIP("192.168.1.10").To4())
+	binary.LittleEndian.PutUint16(p[32:34], 443)
+	binary.LittleEndian.PutUint16(p[34:36], 54321)
+	binary.LittleEndian.PutUint16(p[36:38], 2)
+	p[38] = 6 // IPPROTO_TCP
+	binary.LittleEndian.PutUint64(p[40:48], 5) // bytes, not cumulative
+	putStr(p[48:112], hostname)
 	return p
 }
 
@@ -353,18 +369,8 @@ func TestDecodeValidEvents(t *testing.T) {
 			},
 		},
 		{
-			name: "net_send carries this call's bytes and destination",
-			raw: func() []byte {
-				p := make([]byte, 48)
-				copy(p[0:4], net.ParseIP("93.184.216.34").To4())
-				copy(p[16:20], net.ParseIP("192.168.1.10").To4())
-				binary.LittleEndian.PutUint16(p[32:34], 443)
-				binary.LittleEndian.PutUint16(p[34:36], 54321)
-				binary.LittleEndian.PutUint16(p[36:38], 2)
-				p[38] = 6 // IPPROTO_TCP
-				binary.LittleEndian.PutUint64(p[40:48], 5) // bytes, not cumulative
-				return buildRecord(15, 0, p)
-			}(),
+			name: "net_send carries this call's bytes, destination and SNI hostname",
+			raw:  buildRecord(15, 0, netSendPayload("example.com")),
 			check: func(t *testing.T, d *Decoded) {
 				assertField(t, d, "daddr", "93.184.216.34")
 				assertField(t, d, "saddr", "192.168.1.10")
@@ -373,16 +379,16 @@ func TestDecodeValidEvents(t *testing.T) {
 				assertField(t, d, "family", uint16(2))
 				assertField(t, d, "protocol", uint8(6))
 				assertField(t, d, "bytes", uint64(5))
+				assertField(t, d, "hostname", "example.com")
 				assertNoField(t, d, "dns")
 			},
 		},
 		{
-			name: "net_send flags DNS on port 53",
+			name: "net_send flags DNS on port 53 with the query name",
 			raw: func() []byte {
-				p := make([]byte, 48)
+				p := netSendPayload("dns.example")
 				copy(p[0:4], net.ParseIP("8.8.8.8").To4())
 				binary.LittleEndian.PutUint16(p[32:34], 53)
-				binary.LittleEndian.PutUint16(p[36:38], 2)
 				p[38] = 17 // IPPROTO_UDP
 				p[39] = 1  // DNS bit
 				binary.LittleEndian.PutUint64(p[40:48], 32)
@@ -394,6 +400,15 @@ func TestDecodeValidEvents(t *testing.T) {
 				assertField(t, d, "protocol", uint8(17))
 				assertField(t, d, "bytes", uint64(32))
 				assertField(t, d, "dns", true)
+				assertField(t, d, "hostname", "dns.example")
+			},
+		},
+		{
+			name: "net_send omits hostname when the buffer held no name",
+			raw:  buildRecord(15, 0, netSendPayload("")),
+			check: func(t *testing.T, d *Decoded) {
+				assertField(t, d, "bytes", uint64(5))
+				assertNoField(t, d, "hostname")
 			},
 		},
 		{
@@ -535,7 +550,8 @@ func TestDecodeMalformed(t *testing.T) {
 		{"bad abi version 3", withVersion(buildRecord(2, 0, make([]byte, 8)), 3), "abi version 3"},
 		{"bad abi version 4", withVersion(buildRecord(2, 0, make([]byte, 8)), 4), "abi version 4"},
 		{"bad abi version 5", withVersion(buildRecord(2, 0, make([]byte, 8)), 5), "abi version 5"},
-		{"bad abi version 7", withVersion(buildRecord(2, 0, make([]byte, 8)), 7), "abi version 7"},
+		{"bad abi version 6", withVersion(buildRecord(2, 0, make([]byte, 8)), 6), "abi version 6"},
+		{"bad abi version 8", withVersion(buildRecord(2, 0, make([]byte, 8)), 8), "abi version 8"},
 		{"size below header", withSize(buildRecord(2, 0, make([]byte, 8)), 71), "bad record size 71"},
 		{"size zero", withSize(buildRecord(2, 0, make([]byte, 8)), 0), "bad record size 0"},
 		{"size beyond buffer", withSize(buildRecord(2, 0, make([]byte, 8)), 999), "bad record size 999"},
@@ -551,7 +567,8 @@ func TestDecodeMalformed(t *testing.T) {
 		{"file_io payload short", shortPayload(9, 551), "file_close payload short"},
 		{"file_read payload short", shortPayload(13, 551), "file_rw payload short"},
 		{"file_write payload short", shortPayload(14, 551), "file_rw payload short"},
-		{"net_send payload short", shortPayload(15, 47), "net payload short"},
+		{"net_send payload short", shortPayload(15, 111), "net payload short"},
+		{"net_send v6 size rejected", shortPayload(15, 48), "net payload short"},
 		{"net payload short", shortPayload(10, 47), "net payload short"},
 		{"full record truncated mid-payload", full[:len(full)-1], "bad record size"},
 	}

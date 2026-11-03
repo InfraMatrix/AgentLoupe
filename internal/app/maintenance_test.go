@@ -136,4 +136,23 @@ func TestBuildRequestsModes(t *testing.T) {
 	if names(buildRequests(true, Options{}))["handle_tcp_sendmsg"] {
 		t.Errorf("default set must not attach send probes: per-call sends are opt-in")
 	}
+	// Slice 4: the sys_enter hostname parser rides the same flag with
+	// its own tag, so a verifier rejection degrades to empty hostnames
+	// instead of losing the send events.
+	if names(buildRequests(true, Options{EnableNetSendEvents: true}))["handle_send_enter"] != true {
+		t.Errorf("send-only set missing hostname parser handle_send_enter")
+	}
+	hostTags := func(reqs []progReq) map[string]string {
+		out := map[string]string{}
+		for _, r := range reqs {
+			out[r.Name] = r.Tag
+		}
+		return out
+	}(buildRequests(true, Options{EnableNetSendEvents: true}))
+	if hostTags["handle_send_enter"] != "sndhost" {
+		t.Errorf("hostname parser has tag %q, want %q", hostTags["handle_send_enter"], "sndhost")
+	}
+	if names(buildRequests(true, Options{}))["handle_send_enter"] {
+		t.Errorf("default set must not attach the hostname parser: per-call sends are opt-in")
+	}
 }

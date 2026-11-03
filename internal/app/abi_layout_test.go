@@ -138,9 +138,9 @@ type evNetConnectMirror struct {
 	Pad2     int32
 }
 
-// ev_net_send (ABI v6, slice 3): first 40 bytes mirror ev_net_connect
+// ev_net_send (ABI v7, slices 3/4): first 40 bytes mirror ev_net_connect
 // (addrs, ports, family, protocol, flags); bytes replaces the
-// result/_pad2 tail.
+// result/_pad2 tail; hostname carries the DNS qname / TLS SNI.
 type evNetSendMirror struct {
 	Daddr    [16]byte
 	Saddr    [16]byte
@@ -150,6 +150,7 @@ type evNetSendMirror struct {
 	Protocol uint8
 	Flags    uint8
 	Bytes    uint64
+	Hostname [64]byte
 }
 
 type sessionInfoMirror struct {
@@ -199,8 +200,8 @@ type agentRefMirror struct {
 	AgentName [32]byte
 }
 
-// agentloupe_config (ABI v6: 32 bytes, fully used — slot 6 took the
-// tail pad for enable_net_send_events).
+// agentloupe_config (ABI v6+: 32 bytes, fully used — slot 6 took the
+// tail pad for enable_net_send_events; slice 4 reuses slot 6, no change).
 // Pinned here because the loader writes it as raw bytes in
 // maps.go setConfig/setNetUDPOnly: a silent sizeof change on the C side
 // (e.g. struct tail padding after adding a field) breaks every loader
@@ -367,6 +368,7 @@ func TestStructOffsetsMatchDecoder(t *testing.T) {
 		{"ev_net_send.protocol (p[38])", unsafe.Offsetof(evNetSendMirror{}.Protocol), 38},
 		{"ev_net_send.flags (p[39])", unsafe.Offsetof(evNetSendMirror{}.Flags), 39},
 		{"ev_net_send.bytes (p[40:48])", unsafe.Offsetof(evNetSendMirror{}.Bytes), 40},
+		{"ev_net_send.hostname (p[48:112])", unsafe.Offsetof(evNetSendMirror{}.Hostname), 48},
 		{"session_info.agent_name (raw[40:72])", unsafe.Offsetof(sessionInfoMirror{}.AgentName), 40},
 		{"session_info.root_comm (raw[72:88])", unsafe.Offsetof(sessionInfoMirror{}.RootComm), 72},
 		{"fd_info.session_id (raw[512:520])", unsafe.Offsetof(fdInfoMirror{}.SessionID), 512},
@@ -425,9 +427,9 @@ func TestABIVersionMatchesHeader(t *testing.T) {
 	if m == nil {
 		t.Fatal("AGENTLOUPE_ABI_VERSION not found in bpf/agentloupe.h")
 	}
-	// Decode rejects anything but version 6 (see TestDecodeMalformed);
+	// Decode rejects anything but version 7 (see TestDecodeMalformed);
 	// if the header bumps the version, the decoder must move with it.
-	if string(m[1]) != "6" {
-		t.Errorf("AGENTLOUPE_ABI_VERSION = %s, but the Go decoder only accepts 6", m[1])
+	if string(m[1]) != "7" {
+		t.Errorf("AGENTLOUPE_ABI_VERSION = %s, but the Go decoder only accepts 7", m[1])
 	}
 }

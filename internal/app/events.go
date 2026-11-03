@@ -84,8 +84,8 @@ func Decode(raw []byte) (*Decoded, error) {
 	}
 	size := int(binary.LittleEndian.Uint16(raw[2:4]))
 	version := binary.LittleEndian.Uint16(raw[4:6])
-	if version != 6 {
-		return nil, fmt.Errorf("abi version %d, want 6", version)
+	if version != 7 {
+		return nil, fmt.Errorf("abi version %d, want 7", version)
 	}
 	if size < 72 || size > len(raw) {
 		return nil, fmt.Errorf("bad record size %d (have %d)", size, len(raw))
@@ -212,8 +212,8 @@ func Decode(raw []byte) (*Decoded, error) {
 			d.Fields["daddr"] = net.IP(p[0:16]).String()
 			d.Fields["saddr"] = net.IP(p[16:32]).String()
 		}
-	case 15: // net_send: one tcp/udp_sendmsg call (ABI v6)
-		if !need(48) {
+	case 15: // net_send: one tcp/udp_sendmsg call (ABI v6, +hostname in v7)
+		if !need(112) {
 			return nil, fmt.Errorf("net payload short")
 		}
 		// First 40 bytes mirror ev_net_connect (addrs, ports, family,
@@ -227,6 +227,13 @@ func Decode(raw []byte) (*Decoded, error) {
 			d.Fields["dns"] = true
 		}
 		d.Fields["bytes"] = binary.LittleEndian.Uint64(p[40:48])
+		// Slice 4: DNS qname (DGRAM) / TLS SNI (STREAM) parsed from
+		// this call's send buffer; empty when the buffer held no
+		// parseable name. Omitted from the JSONL when empty, like the
+		// dns bit, so pre-v7 tooling sees a clean absence.
+		if host := cstr(p[48:112]); host != "" {
+			d.Fields["hostname"] = host
+		}
 		if family == 2 {
 			d.Fields["daddr"] = net.IP(p[0:4]).String()
 			d.Fields["saddr"] = net.IP(p[16:20]).String()
