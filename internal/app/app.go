@@ -23,6 +23,9 @@ type Options struct {
 	Output               string
 	EnableIOAccounting   bool
 	EnableSyscallSummary bool
+	// Deprecated: file mutations (unlink/rename/chmod) are core since
+	// slice 1 and always attached; the flag is accepted for
+	// compatibility but ignored.
 	EnableFileMutations  bool
 	StatsInterval        time.Duration
 	SyscallInterval      time.Duration
@@ -47,7 +50,7 @@ type progReq struct {
 	Kind   string // raw_tp | tracepoint | kprobe | lsm | fexit
 	Group  string // tracepoint group, when Kind == tracepoint
 	Target string // symbol / tracepoint name
-	Tag    string // core | mutation | io | syscall | netkprobe
+	Tag    string // core | io | syscall | netkprobe
 }
 
 func buildRequests(lsmMode bool, o Options) []progReq {
@@ -75,18 +78,16 @@ func buildRequests(lsmMode bool, o Options) []progReq {
 		progReq{Name: "handle_tcp_v4_connect", Kind: "fexit", Target: "tcp_v4_connect", Tag: "netkprobe"},
 		progReq{Name: "handle_tcp_v6_connect", Kind: "fexit", Target: "tcp_v6_connect", Tag: "netkprobe"})
 
-	if o.EnableFileMutations {
-		if lsmMode {
-			reqs = append(reqs,
-				progReq{Name: "handle_path_unlink", Kind: "lsm", Tag: "mutation"},
-				progReq{Name: "handle_path_rename", Kind: "lsm", Tag: "mutation"},
-				progReq{Name: "handle_path_chmod", Kind: "lsm", Tag: "mutation"})
-		} else {
-			// Tracepoint mode handles mutations inside
-			// handle_file_sys_enter/exit (raw_tp sys_enter/exit,
-			// already in core), gated by the enable_file_mutations
-			// config flag — no extra programs to attach.
-		}
+	// File mutations (unlink/rename/chmod) are core, not opt-in: they
+	// ride the same low-volume path as file_open, so they are always
+	// attached in LSM mode. Tracepoint mode handles them inside
+	// handle_file_sys_enter/exit (raw_tp sys_enter/exit, already in
+	// core) with no extra programs to attach.
+	if lsmMode {
+		reqs = append(reqs,
+			progReq{Name: "handle_path_unlink", Kind: "lsm", Tag: "core"},
+			progReq{Name: "handle_path_rename", Kind: "lsm", Tag: "core"},
+			progReq{Name: "handle_path_chmod", Kind: "lsm", Tag: "core"})
 	}
 	if o.EnableIOAccounting {
 		reqs = append(reqs,
@@ -136,8 +137,8 @@ type loadAttempt struct {
 func loadCollection(object string, reqs []progReq, logf func(string, ...any)) (*ebpf.Collection, []progReq, string, error) {
 	attempts := []loadAttempt{
 		{"full requested set", nil, false},
-		{"without syscall summary", map[string]bool{"core": true, "mutation": true, "io": true, "netkprobe": true}, false},
-		{"without io accounting or syscall summary", map[string]bool{"core": true, "mutation": true, "netkprobe": true}, false},
+		{"without syscall summary", map[string]bool{"core": true, "io": true, "netkprobe": true}, false},
+		{"without io accounting or syscall summary", map[string]bool{"core": true, "netkprobe": true}, false},
 		{"core + network kprobes only", map[string]bool{"core": true, "netkprobe": true}, false},
 		{"core only, tracepoint network", map[string]bool{"core": true}, true},
 	}
@@ -295,7 +296,9 @@ func Run(ctx context.Context, o Options) error {
 		return err
 	}
 	loader.SetConfig(cfg)
-	if err := loader.setConfig(o.EnableIOAccounting, o.EnableSyscallSummary, o.EnableFileMutations); err != nil {
+	// File mutations are core since slice 1: always enabled in the
+	// kernel config (the slot is retained for ABI stability).
+	if err := loader.setConfig(o.EnableIOAccounting, o.EnableSyscallSummary, true); err != nil {
 		return err
 	}
 	if err := loader.populateRules(cfg, logf); err != nil {
@@ -346,8 +349,8 @@ func Run(ctx context.Context, o Options) error {
 	if len(fallbacks) > 0 {
 		logf("feature probe: failed/fallback hooks: %s", strings.Join(fallbacks, ", "))
 	}
-	logf("probes enabled: process=yes file_open=yes network=yes file_mutations=%v io_accounting=%v syscall_summary=%v",
-		o.EnableFileMutations, o.EnableIOAccounting, o.EnableSyscallSummary)
+	logf("probes enabled: process=yes file_open=yes file_mutations=yes network=yes io_accounting=%v syscall_summary=%v",
+		o.EnableIOAccounting, o.EnableSyscallSummary)
 
 	if coll.Maps["events"] == nil {
 		return fmt.Errorf("events ring buffer map missing from object")

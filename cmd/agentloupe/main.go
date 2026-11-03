@@ -49,7 +49,7 @@ func main() {
 	flag.DurationVar(&maxRuntime, "max-runtime", 0, "stop automatically after this duration (0 = run until signal)")
 	flag.BoolVar(&o.EnableIOAccounting, "enable-io-accounting", false, "opt-in: fexit vfs_read/vfs_write{,v} byte accounting + file_close events (benchmark first: make bench-io)")
 	flag.BoolVar(&o.EnableSyscallSummary, "enable-syscall-summary", false, "opt-in: per-(session, syscall) counts via raw_tp/sys_enter")
-	flag.BoolVar(&o.EnableFileMutations, "enable-file-mutations", false, "opt-in: unlink/rename/chmod events (default probes are process, file-open, network only)")
+	flag.BoolVar(&o.EnableFileMutations, "enable-file-mutations", false, "deprecated no-op: unlink/rename/chmod events are core since slice 1 and always attached")
 	flag.DurationVar(&o.StatsInterval, "stats-interval", 10*time.Second, "how often to print drop/map-full counters (0 = only on shutdown)")
 	flag.DurationVar(&o.SyscallInterval, "syscall-interval", time.Second, "how often to emit syscall_summary JSONL events (deltas; requires --enable-syscall-summary; 0 = only final flush on session end/shutdown)")
 	flag.DurationVar(&o.OrphanTimeout, "orphan-timeout", 3*time.Minute, "how long a session stays open after its root exits while tracked child processes remain alive; on expiry session_end is emitted with reason orphan_timeout (0 = wait indefinitely)")

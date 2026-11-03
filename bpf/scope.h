@@ -512,10 +512,13 @@ static __noinline __u8 path_via_walk(struct dentry *dentry, char *out, bool *par
 	 * exceeded the processed-instruction limit: the verifier walks
 	 * every iteration). The slot's zero padding lands in `out` too;
 	 * the next component's '/' overwrites it. Output truncation
-	 * drops trailing components; *partial says so either way. */
+	 * drops trailing components; *partial says so either way. The idx
+	 * guard on the memcpy is runtime-dead (pos <= 447 there) and exists
+	 * only to prove the copy in-bounds to the verifier (see above). */
 	{
 		int pos = 0;
 		int ci;
+		__u32 idx;
 
 		for (ci = ncomp - 1; ci >= 0; ci--) {
 			__u32 len = lens[ci & (DENTRY_WALK_MAX_DEPTH - 1)];
@@ -526,7 +529,19 @@ static __noinline __u8 path_via_walk(struct dentry *dentry, char *out, bool *par
 			}
 			out[pos & (MAX_PATH_LEN - 1)] = '/';
 			pos++;
-			__builtin_memcpy(&out[pos & (MAX_PATH_LEN - 1)],
+			idx = (__u32)(pos & (MAX_PATH_LEN - 1));
+			/* Verifier guard, runtime-dead (pos <= 447 here, so
+			 * idx <= 447): the '& 511' above widens the tracked
+			 * index range to [0,511], which alone lets this 64-byte
+			 * copy appear to overrun small trailing fields (rename
+			 * new_path ends 8 bytes past its 512-byte field). The
+			 * check proves copy end <= field end <= record end at
+			 * every call site, on every kernel. */
+			if (idx > (__u32)(MAX_PATH_LEN - DENTRY_WALK_MAX_NAME)) {
+				*partial = true;
+				break;
+			}
+			__builtin_memcpy(&out[idx],
 					 &s->names[ci * DENTRY_WALK_MAX_NAME],
 					 DENTRY_WALK_MAX_NAME);
 			pos += (int)len;

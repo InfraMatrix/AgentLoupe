@@ -66,6 +66,13 @@ func TestBuildRequestsModes(t *testing.T) {
 	if tp["handle_file_open"] || tp["handle_bprm_committed_creds"] {
 		t.Errorf("tracepoint set must not contain LSM hooks: %v", tp)
 	}
+	// File mutations are core since slice 1: always attached in LSM mode,
+	// no flag required.
+	for _, m := range []string{"handle_path_unlink", "handle_path_rename", "handle_path_chmod"} {
+		if !lsm[m] {
+			t.Errorf("LSM set missing core mutation hook %s: %v", m, lsm)
+		}
+	}
 	// Core process/network hooks are present in both modes.
 	for _, core := range []string{"handle_fork", "handle_exit", "handle_tcp_v4_connect", "handle_tcp_v6_connect"} {
 		if !lsm[core] || !tp[core] {
