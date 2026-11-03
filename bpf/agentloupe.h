@@ -71,6 +71,7 @@
 #define MAX_AGENT_CGROUPS    2048   /* resolved cgroup IDs (v2 only)      */
 #define MAX_FILE_INFOS       16384  /* struct file * -> fd_info (LRU)     */
 #define MAX_SYSCALL_COUNTS   65536  /* (session, tgid, nr) counters (LRU): ~64 sessions x 32 procs x 32 nrs */
+#define MAX_IN_FLIGHT_RW     4096   /* (pid_tgid, file) entry timestamps for rw latency (LRU) */
 #define RINGBUF_BYTES        (8 * 1024 * 1024)
 
 /* ---- Fixed string sizes (truncation is flagged, never silent) ---------- */
@@ -464,16 +465,18 @@ struct ev_file_close {
  * enable_file_rw_events). bytes is THIS call's return value, not a
  * cumulative total: pairing calls into per-open totals is userspace's
  * job, keyed on (file_ptr, open_ts_ns) — the same key file_close uses.
- * duration_us is RESERVED for slice 2b (fentry/fexit pairing for
- * per-call latency) and is always zero until then; userspace must not
- * interpret it yet.
+ * duration_us is the call's latency in microseconds, paired by slice 2b
+ * fentry programs (see rw_inflight below). Zero means unknown or
+ * sub-microsecond: the exit side found no entry timestamp (fentry missed,
+ * degraded, or never attached), or the call completed in under a
+ * microsecond.
  */
 struct ev_file_rw {
 	char  path[MAX_PATH_LEN];
 	__u64 file_ptr;
 	__u64 bytes;                      /* this call's byte count (ret)      */
 	__u64 open_ts_ns;                 /* pairs with file_ptr: one open     */
-	__u64 duration_us;                /* reserved (slice 2b); always 0     */
+	__u64 duration_us;                /* 0 = unknown or sub-microsecond    */
 	__u8  path_src;                   /* enum path_source                  */
 	__u8  _pad[7];
 };                                        /* 552 bytes                         */
@@ -650,6 +653,27 @@ struct {
 	__type(key, __u64);               /* bpf_get_current_pid_tgid()        */
 	__type(value, struct pending_file_op);
 } pending_file_ops SEC(".maps");
+
+/* In-flight vfs_read/write{,v} entry timestamps for per-call latency
+ * (slice 2b). Written by the fentry probes, consumed + deleted by the
+ * fexit side (account_io). Keyed on (thread, file): a thread cannot have
+ * two synchronous vfs calls in flight, and the file pointer disambiguates
+ * any exotic interleaving (io_uring, AIO). LRU is correct: an evicted or
+ * otherwise missing entry just yields duration_us = 0 on that event —
+ * degraded latency, never a lost event. Stale entries (thread died
+ * mid-call without the fexit running) are bounded by max_entries and
+ * eventually evicted; delete-on-consume keeps the live set tiny.
+ * 16 bytes: no size assert needed (key only, never on the ring). */
+struct rw_inflight_key {
+	__u64 pid_tgid;
+	__u64 file;                       /* struct file *                     */
+};
+struct {
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
+	__uint(max_entries, MAX_IN_FLIGHT_RW);
+	__type(key, struct rw_inflight_key);
+	__type(value, __u64);              /* bpf_ktime_get_ns() at entry       */
+} rw_inflight SEC(".maps");
 
 /* The single output channel. */
 struct {

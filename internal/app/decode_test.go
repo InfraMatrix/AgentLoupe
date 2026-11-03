@@ -296,14 +296,14 @@ func TestDecodeValidEvents(t *testing.T) {
 			},
 		},
 		{
-			name: "file_write carries this call's bytes",
+			name: "file_write carries this call's bytes and latency",
 			raw: func() []byte {
 				p := make([]byte, 552)
 				putStr(p[0:512], "/tmp/probe.txt")
 				binary.LittleEndian.PutUint64(p[512:520], 0xcafe)
 				binary.LittleEndian.PutUint64(p[520:528], 10) // bytes, not cumulative
 				binary.LittleEndian.PutUint64(p[528:536], 777) // open_ts_ns
-				// p[536:544] duration_us stays 0: reserved for slice 2b.
+				binary.LittleEndian.PutUint64(p[536:544], 42) // duration_us (slice 2b)
 				p[544] = 1
 				return buildRecord(14, 0, p)
 			}(),
@@ -312,7 +312,7 @@ func TestDecodeValidEvents(t *testing.T) {
 				assertField(t, d, "file_ptr", "0xcafe")
 				assertField(t, d, "bytes", uint64(10))
 				assertField(t, d, "open_ts_ns", uint64(777))
-				assertField(t, d, "duration_us", uint64(0))
+				assertField(t, d, "duration_us", uint64(42))
 				assertField(t, d, "path_src", "d_path")
 				assertNoField(t, d, "partial")
 			},

@@ -217,6 +217,16 @@ key `file_close` uses. These are the fexit probes, so they work in both
 LSM and tracepoint-fallback modes, and they do not require
 `--enable-io-accounting`.
 
+Latency comes from four companion fentry probes on the same
+`vfs_read`/`vfs_write`/`vfs_readv`/`vfs_writev` symbols: each entry
+stamps `bpf_ktime_get_ns()` into an LRU map keyed on (thread, file),
+and the fexit side consumes it into `duration_us`. The fentry probes
+attach under the same flag but degrade independently — if they fail to
+load, the events still flow with `duration_us` 0, and the loader logs
+`file_rw_latency=false`. A zero duration on an individual event likewise
+means unknown (entry missed or evicted) or sub-microsecond, never a
+dropped event.
+
 Volume warning: this fires on every read/write a tracked process makes,
 including interpreter startup (hundreds of small reads). Prefer it for
 bounded captures, or pair it with `--drop-path-prefix` for trees you do
@@ -230,7 +240,7 @@ still come from `file_close`, so nothing double-counts).
 | `path`, `path_src` | File path and how it was resolved (same semantics as `file_open`). |
 | `file_ptr`, `open_ts_ns` | Correlation key for one open (same as `file_close`). |
 | `bytes` | This call's byte count. |
-| `duration_us` | **Reserved, always 0 in ABI v5.** Slice 2b will pair fentry to fill per-call latency here; nothing should interpret it yet. |
+| `duration_us` | Per-call latency in microseconds, paired by the fentry probes. **0 means unknown** (entry missed, fentry degraded/unattached) **or sub-microsecond** — never a dropped event. |
 
 ### Session lifecycle: `root_exit` and orphans
 

@@ -187,9 +187,9 @@ func Decode(raw []byte) (*Decoded, error) {
 		d.Fields["file_ptr"] = fmt.Sprintf("%#x", binary.LittleEndian.Uint64(p[512:520]))
 		d.Fields["bytes"] = binary.LittleEndian.Uint64(p[520:528])
 		d.Fields["open_ts_ns"] = binary.LittleEndian.Uint64(p[528:536])
-		// duration_us (p[536:544]) is reserved for slice 2b fentry
-		// pairing and always zero in ABI v5; surface it so the
-		// reservation is visible, but nothing should interpret it yet.
+		// duration_us (p[536:544]) is the fentry-paired per-call
+		// latency (slice 2b). Zero means unknown (entry missed,
+		// degraded, or never attached) or sub-microsecond.
 		d.Fields["duration_us"] = binary.LittleEndian.Uint64(p[536:544])
 		d.Fields["path_src"] = pathSrcNames[p[544]]
 	case 10: // net_connect

@@ -88,7 +88,28 @@ func TestBuildRequestsModes(t *testing.T) {
 			t.Errorf("rw-only set missing vfs probe %s: %v", p, rwOnly)
 		}
 	}
+	// Slice 2b: the fentry latency probes ride the same flag with their
+	// own tag, so a bad fentry prototype degrades to zero durations
+	// instead of losing the fexit events.
+	rwTags := func(reqs []progReq) map[string]string {
+		out := map[string]string{}
+		for _, r := range reqs {
+			out[r.Name] = r.Tag
+		}
+		return out
+	}(buildRequests(true, Options{EnableFileRWEvents: true}))
+	for _, p := range []string{"handle_vfs_read_entry", "handle_vfs_write_entry", "handle_vfs_readv_entry", "handle_vfs_writev_entry"} {
+		if !rwOnly[p] {
+			t.Errorf("rw-only set missing fentry latency probe %s: %v", p, rwOnly)
+		}
+		if rwTags[p] != "lat" {
+			t.Errorf("fentry latency probe %s has tag %q, want %q", p, rwTags[p], "lat")
+		}
+	}
 	if names(buildRequests(true, Options{}))["handle_vfs_read"] {
 		t.Errorf("default set must not attach vfs probes: per-call I/O is opt-in")
+	}
+	if names(buildRequests(true, Options{}))["handle_vfs_read_entry"] {
+		t.Errorf("default set must not attach fentry latency probes: per-call I/O is opt-in")
 	}
 }

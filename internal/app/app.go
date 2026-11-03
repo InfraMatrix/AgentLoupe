@@ -24,11 +24,12 @@ type Options struct {
 	EnableIOAccounting   bool
 	EnableSyscallSummary bool
 	// EnableFileRWEvents opts into per-call file_read/file_write
-	// events (ABI v5, slice 2a): one discrete event per vfs_read /
+	// events (ABI v5, slices 2a/2b): one discrete event per vfs_read /
 	// write{,v} call with this call's byte count and timestamps.
 	// Off by default: host-wide vfs traffic makes this very loud.
-	// Works without EnableIOAccounting; duration_us stays zero until
-	// slice 2b pairs fentry for per-call latency.
+	// Works without EnableIOAccounting; duration_us is filled by the
+	// slice-2b fentry pairing when it attaches (0 = unknown or
+	// sub-microsecond).
 	EnableFileRWEvents   bool
 	// EnableFileMutations is accepted for compatibility but ignored:
 	// file mutations (unlink/rename/chmod) are core since slice 1
@@ -57,7 +58,7 @@ type progReq struct {
 	Kind   string // raw_tp | tracepoint | kprobe | lsm | fexit
 	Group  string // tracepoint group, when Kind == tracepoint
 	Target string // symbol / tracepoint name
-	Tag    string // core | io | syscall | netkprobe
+	Tag    string // core | io | syscall | netkprobe | lat
 }
 
 func buildRequests(lsmMode bool, o Options) []progReq {
@@ -103,6 +104,17 @@ func buildRequests(lsmMode bool, o Options) []progReq {
 			progReq{Name: "handle_vfs_readv", Kind: "fexit", Target: "vfs_readv", Tag: "io"},
 			progReq{Name: "handle_vfs_writev", Kind: "fexit", Target: "vfs_writev", Tag: "io"})
 	}
+	// Slice 2b: fentry entry-timestamp probes pairing the fexit side
+	// above for per-call latency (duration_us). Same flag, own tag:
+	// if the fentry probes fail to load, the degradation ladder drops
+	// just them and the fexit events keep flowing with duration_us = 0.
+	if o.EnableFileRWEvents {
+		reqs = append(reqs,
+			progReq{Name: "handle_vfs_read_entry", Kind: "fentry", Target: "vfs_read", Tag: "lat"},
+			progReq{Name: "handle_vfs_write_entry", Kind: "fentry", Target: "vfs_write", Tag: "lat"},
+			progReq{Name: "handle_vfs_readv_entry", Kind: "fentry", Target: "vfs_readv", Tag: "lat"},
+			progReq{Name: "handle_vfs_writev_entry", Kind: "fentry", Target: "vfs_writev", Tag: "lat"})
+	}
 	if o.EnableSyscallSummary {
 		reqs = append(reqs, progReq{Name: "handle_sys_enter_count", Kind: "raw_tp", Target: "sys_enter", Tag: "syscall"})
 	}
@@ -125,6 +137,8 @@ func attachOne(coll *ebpf.Collection, r progReq) (link.Link, error) {
 		return link.AttachLSM(link.LSMOptions{Program: prog})
 	case "fexit":
 		return link.AttachTracing(link.TracingOptions{Program: prog, AttachType: ebpf.AttachTraceFExit})
+	case "fentry":
+		return link.AttachTracing(link.TracingOptions{Program: prog, AttachType: ebpf.AttachTraceFEntry})
 	}
 	return nil, fmt.Errorf("unknown attach kind %q", r.Kind)
 }
@@ -144,7 +158,8 @@ type loadAttempt struct {
 func loadCollection(object string, reqs []progReq, logf func(string, ...any)) (*ebpf.Collection, []progReq, string, error) {
 	attempts := []loadAttempt{
 		{"full requested set", nil, false},
-		{"without syscall summary", map[string]bool{"core": true, "io": true, "netkprobe": true}, false},
+		{"without syscall summary", map[string]bool{"core": true, "io": true, "lat": true, "netkprobe": true}, false},
+		{"without fentry latency (durations stay zero)", map[string]bool{"core": true, "io": true, "netkprobe": true}, false},
 		{"without io accounting or syscall summary", map[string]bool{"core": true, "netkprobe": true}, false},
 		{"core + network kprobes only", map[string]bool{"core": true, "netkprobe": true}, false},
 		{"core only, tracepoint network", map[string]bool{"core": true}, true},
@@ -329,9 +344,14 @@ func Run(ctx context.Context, o Options) error {
 		return true
 	}
 	kprobeFailed := 0
+	latAttached := 0
 	for _, r := range useReqs {
-		if !attach(r) && r.Tag == "netkprobe" {
+		ok := attach(r)
+		if !ok && r.Tag == "netkprobe" {
 			kprobeFailed++
+		}
+		if ok && r.Tag == "lat" {
+			latAttached++
 		}
 	}
 	// sys_enter_connect is ALWAYS attached: with TCP fexit live it runs
@@ -357,8 +377,8 @@ func Run(ctx context.Context, o Options) error {
 	if len(fallbacks) > 0 {
 		logf("feature probe: failed/fallback hooks: %s", strings.Join(fallbacks, ", "))
 	}
-	logf("probes enabled: process=yes file_open=yes file_mutations=yes network=yes io_accounting=%v file_rw_events=%v syscall_summary=%v",
-		o.EnableIOAccounting, o.EnableFileRWEvents, o.EnableSyscallSummary)
+	logf("probes enabled: process=yes file_open=yes file_mutations=yes network=yes io_accounting=%v file_rw_events=%v file_rw_latency=%v syscall_summary=%v",
+		o.EnableIOAccounting, o.EnableFileRWEvents, o.EnableFileRWEvents && latAttached == 4, o.EnableSyscallSummary)
 
 	if coll.Maps["events"] == nil {
 		return fmt.Errorf("events ring buffer map missing from object")

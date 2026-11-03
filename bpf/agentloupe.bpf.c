@@ -908,10 +908,14 @@ int handle_file_sys_exit(struct sys_raw_args *ctx)
  * in the caller's process context, so fill_hdr's task-NULL path still
  * stamps the right comm/uid; the tgid stamped is the caller's, while
  * session attribution comes from fd_info (the opener's session), exactly
- * like file_close. duration_us stays zero until slice 2b pairs fentry
- * for per-call latency. */
+ * like file_close. duration_us comes from slice 2b fentry pairing
+ * (rw_take_duration); callers pass 0 when the fentry side is off. Only
+ * called when slot 5 is on — the gate lives in account_io so the
+ * exit-side in-flight lookup (and the entry-side map traffic) costs
+ * nothing when the feature is off. */
 static __always_inline void emit_file_rw(struct fd_info *info, __u64 key,
-					 __u64 bytes, bool is_write)
+					 __u64 bytes, bool is_write,
+					 __u64 duration_us)
 {
 	struct session_info sinfo = {};
 	struct event_hdr *hdr;
@@ -920,8 +924,6 @@ static __always_inline void emit_file_rw(struct fd_info *info, __u64 key,
 	__u32 evlen = is_write ? EVLEN_FILE_WRITE : EVLEN_FILE_READ;
 	int i;
 
-	if (!cfg_enabled(5))
-		return;
 	if (load_session_info(info->session_id, &sinfo) &&
 	    sinfo.state != SESSION_STATE_REJECTED) {
 		hdr = reserve_event(type, evlen, info->session_id, &sinfo,
@@ -934,11 +936,51 @@ static __always_inline void emit_file_rw(struct fd_info *info, __u64 key,
 			ev->file_ptr = key;
 			ev->bytes = bytes;
 			ev->open_ts_ns = info->open_ts_ns;
-			ev->duration_us = 0; /* reserved: slice 2b fentry pairing */
+			ev->duration_us = duration_us;
 			ev->path_src = info->path_src;
 			submit_event(hdr, type);
 		}
 	}
+}
+
+/* Slice 2b entry side: stamp this thread's vfs_read/write{,v} entry time.
+ * Gated on slot 5 and on scope (tracked, non-pseudo) so the map holds
+ * only entries the fexit side can consume — every other host call costs
+ * one config check + one session lookup and nothing else. */
+static __always_inline void rw_entry(struct file *file)
+{
+	struct rw_inflight_key key;
+	__u64 sid = 0, now;
+
+	if (!cfg_enabled(5))
+		return;
+	if (!tracked_sid(cur_tgid(), &sid) || file_is_pseudo(file))
+		return;
+	key.pid_tgid = bpf_get_current_pid_tgid();
+	key.file = (unsigned long)file;
+	now = bpf_ktime_get_ns();
+	bpf_map_update_elem(&rw_inflight, &key, &now, BPF_ANY);
+}
+
+/* Slice 2b exit side: consume this thread's entry timestamp for file and
+ * return the latency in microseconds, or 0 when no entry exists (entry
+ * probe missed, fentry degraded/never attached, or LRU-evicted — the
+ * event still goes out with full attribution, just no latency). */
+static __always_inline __u64 rw_take_duration(__u64 key_file)
+{
+	struct rw_inflight_key key;
+	__u64 *entry, now, dur = 0;
+
+	key.pid_tgid = bpf_get_current_pid_tgid();
+	key.file = key_file;
+	entry = bpf_map_lookup_elem(&rw_inflight, &key);
+	if (!entry)
+		return 0;
+	now = bpf_ktime_get_ns();
+	if (now > *entry)
+		dur = now - *entry;
+	bpf_map_delete_elem(&rw_inflight, &key);
+	return dur / 1000; /* ns -> us; sub-microsecond reads as 0 */
 }
 
 static __always_inline void account_io(struct file *file, long ret, bool is_write)
@@ -990,8 +1032,47 @@ static __always_inline void account_io(struct file *file, long ret, bool is_writ
 			__sync_fetch_and_add(&info->read_bytes, (__u64)ret);
 	}
 	/* Per-call event, independent of the cumulative counters above:
-	 * --enable-file-rw-events works without --enable-io-accounting. */
-	emit_file_rw(info, key, (__u64)ret, is_write);
+	 * --enable-file-rw-events works without --enable-io-accounting.
+	 * The single slot-5 gate here covers the emit AND the exit-side
+	 * in-flight lookup (rw_take_duration): with the feature off, this
+	 * tail costs nothing and the fentry probes record nothing either. */
+	if (cfg_enabled(5))
+		emit_file_rw(info, key, (__u64)ret, is_write,
+			     rw_take_duration(key));
+}
+
+SEC("fentry/vfs_read")
+int BPF_PROG(handle_vfs_read_entry, struct file *file, char *buf,
+	     size_t count, loff_t *pos)
+{
+	rw_entry(file);
+	return 0;
+}
+
+SEC("fentry/vfs_write")
+int BPF_PROG(handle_vfs_write_entry, struct file *file, const char *buf,
+	     size_t count, loff_t *pos)
+{
+	rw_entry(file);
+	return 0;
+}
+
+SEC("fentry/vfs_readv")
+int BPF_PROG(handle_vfs_readv_entry, struct file *file,
+	     const struct iovec *vec, unsigned long vlen, loff_t *pos,
+	     rwf_t flags)
+{
+	rw_entry(file);
+	return 0;
+}
+
+SEC("fentry/vfs_writev")
+int BPF_PROG(handle_vfs_writev_entry, struct file *file,
+	     const struct iovec *vec, unsigned long vlen, loff_t *pos,
+	     rwf_t flags)
+{
+	rw_entry(file);
+	return 0;
 }
 
 SEC("fexit/vfs_read")
