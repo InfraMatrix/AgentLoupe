@@ -901,6 +901,46 @@ int handle_file_sys_exit(struct sys_raw_args *ctx)
  * The Stage 3 gate for enabling this by default is `make bench-io`.
  * ==================================================================== */
 
+/* Per-call read/write events (ABI v5, slice 2a): one discrete event per
+ * vfs_read/write{,v} call on a tracked file, carrying this call's byte
+ * count plus kernel timestamps. Opt-in via enable_file_rw_events (slot
+ * 5): host-wide vfs traffic makes this far too loud to be default. Runs
+ * in the caller's process context, so fill_hdr's task-NULL path still
+ * stamps the right comm/uid; the tgid stamped is the caller's, while
+ * session attribution comes from fd_info (the opener's session), exactly
+ * like file_close. duration_us stays zero until slice 2b pairs fentry
+ * for per-call latency. */
+static __always_inline void emit_file_rw(struct fd_info *info, __u64 key,
+					 __u64 bytes, bool is_write)
+{
+	struct session_info sinfo = {};
+	struct event_hdr *hdr;
+	struct ev_file_rw *ev;
+	__u32 type = is_write ? EVENT_FILE_WRITE : EVENT_FILE_READ;
+	__u32 evlen = is_write ? EVLEN_FILE_WRITE : EVLEN_FILE_READ;
+	int i;
+
+	if (!cfg_enabled(5))
+		return;
+	if (load_session_info(info->session_id, &sinfo) &&
+	    sinfo.state != SESSION_STATE_REJECTED) {
+		hdr = reserve_event(type, evlen, info->session_id, &sinfo,
+				    NULL, cur_tgid());
+		if (hdr) {
+			ev = (struct ev_file_rw *)(void *)(hdr + 1);
+#pragma unroll
+			for (i = 0; i < MAX_PATH_LEN; i++)
+				ev->path[i] = info->path[i];
+			ev->file_ptr = key;
+			ev->bytes = bytes;
+			ev->open_ts_ns = info->open_ts_ns;
+			ev->duration_us = 0; /* reserved: slice 2b fentry pairing */
+			ev->path_src = info->path_src;
+			submit_event(hdr, type);
+		}
+	}
+}
+
 static __always_inline void account_io(struct file *file, long ret, bool is_write)
 {
 	struct fd_info *info;
@@ -927,7 +967,9 @@ static __always_inline void account_io(struct file *file, long ret, bool is_writ
 		bool partial = false;
 		__u8 src;
 
-		if (!cfg_enabled(2))
+		/* Lazy entries serve both byte counting (slot 2) and per-call
+		 * read/write events (slot 5): create when either is on. */
+		if (!cfg_enabled(2) && !cfg_enabled(5))
 			return;
 		if (!tracked_sid(cur_tgid(), &sid) || file_is_pseudo(file))
 			return;
@@ -941,12 +983,15 @@ static __always_inline void account_io(struct file *file, long ret, bool is_writ
 			return;
 		info = created;
 	}
-	if (!cfg_enabled(2))
-		return;
-	if (is_write)
-		__sync_fetch_and_add(&info->write_bytes, (__u64)ret);
-	else
-		__sync_fetch_and_add(&info->read_bytes, (__u64)ret);
+	if (cfg_enabled(2)) {
+		if (is_write)
+			__sync_fetch_and_add(&info->write_bytes, (__u64)ret);
+		else
+			__sync_fetch_and_add(&info->read_bytes, (__u64)ret);
+	}
+	/* Per-call event, independent of the cumulative counters above:
+	 * --enable-file-rw-events works without --enable-io-accounting. */
+	emit_file_rw(info, key, (__u64)ret, is_write);
 }
 
 SEC("fexit/vfs_read")

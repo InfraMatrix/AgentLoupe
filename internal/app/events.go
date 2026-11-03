@@ -20,6 +20,7 @@ var typeNames = map[uint16]string{
 	1: "exec", 2: "fork", 3: "exit", 4: "file_open", 5: "file_unlink",
 	6: "file_rename", 7: "file_chmod", 8: "file_close", 9: "file_io",
 	10: "net_connect", 11: "session_start", 12: "session_end",
+	13: "file_read", 14: "file_write",
 }
 
 var pathSrcNames = map[uint8]string{
@@ -83,8 +84,8 @@ func Decode(raw []byte) (*Decoded, error) {
 	}
 	size := int(binary.LittleEndian.Uint16(raw[2:4]))
 	version := binary.LittleEndian.Uint16(raw[4:6])
-	if version != 4 {
-		return nil, fmt.Errorf("abi version %d, want 4", version)
+	if version != 5 {
+		return nil, fmt.Errorf("abi version %d, want 5", version)
 	}
 	if size < 72 || size > len(raw) {
 		return nil, fmt.Errorf("bad record size %d (have %d)", size, len(raw))
@@ -178,6 +179,19 @@ func Decode(raw []byte) (*Decoded, error) {
 		if d.Type == 9 {
 			d.Fields["partial"] = true
 		}
+	case 13, 14: // file_read / file_write: one vfs call (ABI v5)
+		if !need(552) {
+			return nil, fmt.Errorf("file_rw payload short")
+		}
+		d.Fields["path"] = cstr(p[0:512])
+		d.Fields["file_ptr"] = fmt.Sprintf("%#x", binary.LittleEndian.Uint64(p[512:520]))
+		d.Fields["bytes"] = binary.LittleEndian.Uint64(p[520:528])
+		d.Fields["open_ts_ns"] = binary.LittleEndian.Uint64(p[528:536])
+		// duration_us (p[536:544]) is reserved for slice 2b fentry
+		// pairing and always zero in ABI v5; surface it so the
+		// reservation is visible, but nothing should interpret it yet.
+		d.Fields["duration_us"] = binary.LittleEndian.Uint64(p[536:544])
+		d.Fields["path_src"] = pathSrcNames[p[544]]
 	case 10: // net_connect
 		if !need(48) {
 			return nil, fmt.Errorf("net payload short")
@@ -329,7 +343,7 @@ func (p *Processor) shouldDrop(d *Decoded) bool {
 	}
 	var paths []string
 	switch d.Type {
-	case 4, 5, 7, 8, 9:
+	case 4, 5, 7, 8, 9, 13, 14:
 		if s, ok := d.Fields["path"].(string); ok {
 			paths = append(paths, s)
 		}

@@ -79,4 +79,16 @@ func TestBuildRequestsModes(t *testing.T) {
 			t.Errorf("core hook %s missing from a mode (lsm=%v tp=%v)", core, lsm[core], tp[core])
 		}
 	}
+	// The vfs fexit probes attach when byte accounting OR per-call
+	// read/write events are enabled (slice 2a); rw events work without
+	// the cumulative counters.
+	rwOnly := names(buildRequests(true, Options{EnableFileRWEvents: true}))
+	for _, p := range []string{"handle_vfs_read", "handle_vfs_write", "handle_vfs_readv", "handle_vfs_writev"} {
+		if !rwOnly[p] {
+			t.Errorf("rw-only set missing vfs probe %s: %v", p, rwOnly)
+		}
+	}
+	if names(buildRequests(true, Options{}))["handle_vfs_read"] {
+		t.Errorf("default set must not attach vfs probes: per-call I/O is opt-in")
+	}
 }

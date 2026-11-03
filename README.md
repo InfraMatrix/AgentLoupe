@@ -85,6 +85,9 @@ Opt-in probes (off by default):
 --enable-syscall-summary   # per-(session, process, syscall) counts, dumped by name
                            # in the stats log (top 25 per session) and, with
                            # --syscall-interval, as syscall_summary JSONL events
+--enable-file-rw-events    # discrete file_read/file_write event per vfs call
+                           # (ABI v5: this call's size + timestamps only;
+                           # works without --enable-io-accounting)
 ```
 
 ### Try the demo (one command)
@@ -201,6 +204,33 @@ Example:
 ```json
 {"ts":"2026-10-30T16:05:36.915939035Z","type":"syscall_summary","session_id":14067088359163953153,"parent_session_id":0,"agent_name":"claude-code","pid":0,"pid_in_ns":0,"ppid":0,"uid":0,"comm":"","interval_ms":1010,"counts":{"close":1,"epoll_pwait2":5,"fstat":1,"futex":175,"madvise":10,"openat":1,"read":2,"statx":5,"write":2},"per_process_counts":{"5124":{"close":1,"epoll_pwait2":5,"fstat":1,"futex":175,"madvise":10,"openat":1,"read":2,"statx":5,"write":2}}}
 ```
+
+#### `file_read` / `file_write` events
+
+With `--enable-file-rw-events`, the loader emits one discrete event per
+`vfs_read`/`vfs_write` (and `readv`/`writev`) call on a tracked file —
+the per-call attribution that `file_close` totals and
+`--enable-io-accounting` counters cannot give. `bytes` is **this call's**
+byte count (the call's return value), not a cumulative total; pairing
+calls into per-open totals is done on `(file_ptr, open_ts_ns)`, the same
+key `file_close` uses. These are the fexit probes, so they work in both
+LSM and tracepoint-fallback modes, and they do not require
+`--enable-io-accounting`.
+
+Volume warning: this fires on every read/write a tracked process makes,
+including interpreter startup (hundreds of small reads). Prefer it for
+bounded captures, or pair it with `--drop-path-prefix` for trees you do
+not care about. The events land in the timeline as per-path markers and
+in the scorecard as `file_reads`/`file_writes` call counts (byte totals
+still come from `file_close`, so nothing double-counts).
+
+| Field | Meaning |
+|---|---|
+| `type` | `"file_read"` or `"file_write"`. |
+| `path`, `path_src` | File path and how it was resolved (same semantics as `file_open`). |
+| `file_ptr`, `open_ts_ns` | Correlation key for one open (same as `file_close`). |
+| `bytes` | This call's byte count. |
+| `duration_us` | **Reserved, always 0 in ABI v5.** Slice 2b will pair fentry to fill per-call latency here; nothing should interpret it yet. |
 
 ### Session lifecycle: `root_exit` and orphans
 
@@ -338,7 +368,7 @@ Not yet tested on a live kernel:
   from raw syscall arguments (relative paths stay relative) and the
   dentry walk may miss mount prefixes.
 - **Opt-in probe sets** (`--enable-io-accounting`,
-  `--enable-syscall-summary`). Not attached in the tested configuration
+  `--enable-syscall-summary`, `--enable-file-rw-events`). Not attached in the tested configuration
   unless noted. (Unlink/rename/chmod events are core since slice 1 and
   always attached.)
 - **Any other kernel version.** The 5.8 / 5.11 figures above are design

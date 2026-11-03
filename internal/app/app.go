@@ -23,6 +23,13 @@ type Options struct {
 	Output               string
 	EnableIOAccounting   bool
 	EnableSyscallSummary bool
+	// EnableFileRWEvents opts into per-call file_read/file_write
+	// events (ABI v5, slice 2a): one discrete event per vfs_read /
+	// write{,v} call with this call's byte count and timestamps.
+	// Off by default: host-wide vfs traffic makes this very loud.
+	// Works without EnableIOAccounting; duration_us stays zero until
+	// slice 2b pairs fentry for per-call latency.
+	EnableFileRWEvents   bool
 	// EnableFileMutations is accepted for compatibility but ignored:
 	// file mutations (unlink/rename/chmod) are core since slice 1
 	// and always attached.
@@ -89,7 +96,7 @@ func buildRequests(lsmMode bool, o Options) []progReq {
 			progReq{Name: "handle_path_rename", Kind: "lsm", Tag: "core"},
 			progReq{Name: "handle_path_chmod", Kind: "lsm", Tag: "core"})
 	}
-	if o.EnableIOAccounting {
+	if o.EnableIOAccounting || o.EnableFileRWEvents {
 		reqs = append(reqs,
 			progReq{Name: "handle_vfs_read", Kind: "fexit", Target: "vfs_read", Tag: "io"},
 			progReq{Name: "handle_vfs_write", Kind: "fexit", Target: "vfs_write", Tag: "io"},
@@ -298,7 +305,8 @@ func Run(ctx context.Context, o Options) error {
 	loader.SetConfig(cfg)
 	// File mutations are core since slice 1: always enabled in the
 	// kernel config (the slot is retained for ABI stability).
-	if err := loader.setConfig(o.EnableIOAccounting, o.EnableSyscallSummary, true); err != nil {
+	// Per-call read/write events are opt-in (slot 5, ABI v5).
+	if err := loader.setConfig(o.EnableIOAccounting, o.EnableSyscallSummary, true, o.EnableFileRWEvents); err != nil {
 		return err
 	}
 	if err := loader.populateRules(cfg, logf); err != nil {
@@ -349,8 +357,8 @@ func Run(ctx context.Context, o Options) error {
 	if len(fallbacks) > 0 {
 		logf("feature probe: failed/fallback hooks: %s", strings.Join(fallbacks, ", "))
 	}
-	logf("probes enabled: process=yes file_open=yes file_mutations=yes network=yes io_accounting=%v syscall_summary=%v",
-		o.EnableIOAccounting, o.EnableSyscallSummary)
+	logf("probes enabled: process=yes file_open=yes file_mutations=yes network=yes io_accounting=%v file_rw_events=%v syscall_summary=%v",
+		o.EnableIOAccounting, o.EnableFileRWEvents, o.EnableSyscallSummary)
 
 	if coll.Maps["events"] == nil {
 		return fmt.Errorf("events ring buffer map missing from object")

@@ -65,7 +65,7 @@ text{fill:var(--ink)} .muted{fill:var(--muted)} .lbl{font-size:11px} .hdr{font-s
 const DATA=JSON.parse(document.getElementById('data').textContent);
 const COLORS=["#2a78d6","#eb6834","#1baf7a","#eda100","#e87ba4","#008300","#6250d6","#e34948"];
 const OTHER="#898781";
-const MARK={file_open:"#eb6834",file_unlink:"#e34948",file_rename:"#eda100",file_chmod:"#e87ba4",net_connect:"#1baf7a"};
+const MARK={file_open:"#eb6834",file_unlink:"#e34948",file_rename:"#eda100",file_chmod:"#e87ba4",file_read:"#c46ad6",file_write:"#7a4fd6",net_connect:"#1baf7a"};
 const CATCOLORS={process:"#2a78d6",file:"#eb6834",network:"#1baf7a",memory:"#eda100","sync/wait":"#e87ba4",signals:"#008300",time:"#6250d6",other:"#898781"};
 const HIDDEN={memory:1,"sync/wait":1};
 let view=[0,Math.max(1,DATA.duration_ms||1)];

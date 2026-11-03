@@ -31,6 +31,7 @@ type event struct {
 	Protocol     uint8    `json:"protocol"`
 	ReadB        uint64   `json:"read_bytes"`
 	WriteB       uint64   `json:"write_bytes"`
+	Bytes        uint64   `json:"bytes"`
 	Partial      bool     `json:"partial"`
 	CPUUserMS    uint64   `json:"cpu_user_ms"`
 	CPUSysMS     uint64   `json:"cpu_sys_ms"`
@@ -52,6 +53,8 @@ type scorecard struct {
 	Opens      int     `json:"file_opens"`
 	UniqPaths  int     `json:"unique_paths"`
 	Mutations  int     `json:"mutations"`
+	Reads      int     `json:"file_reads"`
+	Writes     int     `json:"file_writes"`
 	ReadBytes  uint64  `json:"read_bytes"`
 	WriteBytes uint64  `json:"write_bytes"`
 	Connects   int     `json:"net_connects"`
@@ -142,6 +145,14 @@ func summarize(events []event) []*scorecard {
 			}
 		case "file_unlink", "file_rename", "file_chmod":
 			s.Mutations++
+		case "file_read", "file_write":
+			// Count calls only: byte totals come from file_close,
+			// so adding ev.Bytes here would double-count.
+			if ev.Type == "file_read" {
+				s.Reads++
+			} else {
+				s.Writes++
+			}
 		case "file_close":
 			// Final close carries cumulative totals; file_io partials
 			// are deltas already, so summing both would double-count.
@@ -226,8 +237,8 @@ func main() {
 		fmt.Printf("%-22s %-10d %7.1fs %6d %6d %7d %7d %9d %9d %5d %d+%d\n",
 			trunc(s.Agent, 22), s.SessionID%10000000000, s.DurationS, s.Execs, s.Forks,
 			s.Opens, s.UniqPaths, s.ReadBytes, s.WriteBytes, s.Connects, s.CPUUserMS, s.CPUSysMS)
-		fmt.Printf("    comms=%v dirs=%v net=%v dns=%d mutations=%d\n",
-			s.TopComms, s.TopDirs, s.Net, s.DNS, s.Mutations)
+		fmt.Printf("    comms=%v dirs=%v net=%v dns=%d mutations=%d reads=%d writes=%d\n",
+			s.TopComms, s.TopDirs, s.Net, s.DNS, s.Mutations, s.Reads, s.Writes)
 		if s.RootExit != "" {
 			fmt.Printf("    root_exit=%s orphan_gap=%.1fs end_reason=%s still_running=%v\n",
 				s.RootExit, s.OrphanGapS, s.SessionEndReason, s.StillRunning)

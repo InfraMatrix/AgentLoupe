@@ -47,6 +47,7 @@ type rawEvent struct {
 	NewPath      string                       `json:"new_path"`
 	Mode         string                       `json:"mode"`
 	OpenFlags    uint32                       `json:"open_flags"`
+	Bytes        uint64                       `json:"bytes"`
 	ChildPID     uint32                       `json:"child_pid"`
 	Daddr        string                       `json:"daddr"`
 	Dport        uint16                       `json:"dport"`
@@ -459,6 +460,13 @@ func (b *builder) add(ev *rawEvent) {
 		}
 		if hasTS {
 			s.addMarker(&Marker{Ts: ev.Ts, Type: ev.Type, PID: ev.PID, Detail: ev.OldPath + " -> " + ev.NewPath})
+		}
+	case "file_read", "file_write":
+		if ev.Path != "" {
+			s.files[ev.Path]++
+		}
+		if hasTS {
+			s.addMarker(&Marker{Ts: ev.Ts, Type: ev.Type, PID: ev.PID, Detail: fmt.Sprintf("%s %d bytes", ev.Path, ev.Bytes)})
 		}
 	case "net_connect":
 		dest := fmt.Sprintf("%s:%d", ev.Daddr, ev.Dport)

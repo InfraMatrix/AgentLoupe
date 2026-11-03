@@ -56,7 +56,7 @@
 #ifndef AGENTLOUPE_H
 #define AGENTLOUPE_H
 
-#define AGENTLOUPE_ABI_VERSION 4
+#define AGENTLOUPE_ABI_VERSION 5
 
 /* Minimum kernel for full (LSM) mode; the loader enforces this, the
  * header only documents it. Fallback floor is 5.8. */
@@ -105,7 +105,9 @@ enum event_type {
 	EVENT_NET_CONNECT   = 10, /* connect() to AF_INET/AF_INET6              */
 	EVENT_SESSION_START = 11, /* userspace-synthesised on confirm/attach    */
 	EVENT_SESSION_END   = 12, /* userspace-synthesised on leader exit       */
-	EVENT_MAX           = 13,
+	EVENT_FILE_READ     = 13, /* fexit vfs_read/readv, opt-in (ABI v5)      */
+	EVENT_FILE_WRITE    = 14, /* fexit vfs_write/writev, opt-in (ABI v5)    */
+	EVENT_MAX           = 15,
 };
 
 /* How a path string in a payload was obtained. Recorded per path (rename
@@ -320,11 +322,17 @@ struct agentloupe_counters {
 struct agentloupe_config {
 	__u64 run_id;                     /* echoed in every userspace record  */
 	__u32 enable_syscall_summary;     /* gates raw_syscalls:sys_enter body */
-	__u32 enable_file_io_accounting;  /* gates vfs_read/write(v) probes    */
-	__u32 enable_file_mutations;      /* gates unlink/rename/chmod fallback */
+	__u32 enable_file_io_accounting;  /* gates vfs_read/write(v) counting  */
+	__u32 enable_file_mutations;      /* retained for ABI stability: slice 1
+	                                     * made mutations core, always on   */
 	__u32 net_udp_only;               /* enter_connect emits SOCK_DGRAM only
-	                                   * (set when TCP fexit probes attached) */
-};
+	                                     * (set when TCP fexit probes attached) */
+	__u32 enable_file_rw_events;      /* gates per-call read/write events
+	                                     * (ABI v5, slice 2a; size+timestamps
+	                                     * only, no per-call latency yet)  */
+	__u32 _pad;                       /* explicit tail pad: sizeof must stay
+	                                     * a multiple of 8 (32 bytes total) */
+};                                        /* 32 bytes                          */
 
 /* ---- Event records -------------------------------------------------------
  *
@@ -451,6 +459,25 @@ struct ev_file_close {
 	__u8  _pad[7];
 };                                        /* 552 bytes                         */
 
+/*
+ * One read(2)/write(2)-class call on a tracked file (ABI v5, opt-in via
+ * enable_file_rw_events). bytes is THIS call's return value, not a
+ * cumulative total: pairing calls into per-open totals is userspace's
+ * job, keyed on (file_ptr, open_ts_ns) — the same key file_close uses.
+ * duration_us is RESERVED for slice 2b (fentry/fexit pairing for
+ * per-call latency) and is always zero until then; userspace must not
+ * interpret it yet.
+ */
+struct ev_file_rw {
+	char  path[MAX_PATH_LEN];
+	__u64 file_ptr;
+	__u64 bytes;                      /* this call's byte count (ret)      */
+	__u64 open_ts_ns;                 /* pairs with file_ptr: one open     */
+	__u64 duration_us;                /* reserved (slice 2b); always 0     */
+	__u8  path_src;                   /* enum path_source                  */
+	__u8  _pad[7];
+};                                        /* 552 bytes                         */
+
 struct ev_net_connect {
 	__u8  daddr[16];                  /* IPv4 in first 4 bytes if family=2 */
 	__u8  saddr[16];
@@ -473,6 +500,8 @@ struct ev_net_connect {
 #define EVLEN_FILE_RENAME (sizeof(struct event_hdr) + sizeof(struct ev_file_rename))
 #define EVLEN_FILE_CHMOD (sizeof(struct event_hdr) + sizeof(struct ev_file_chmod))
 #define EVLEN_FILE_CLOSE (sizeof(struct event_hdr) + sizeof(struct ev_file_close))
+#define EVLEN_FILE_READ (sizeof(struct event_hdr) + sizeof(struct ev_file_rw))
+#define EVLEN_FILE_WRITE (sizeof(struct event_hdr) + sizeof(struct ev_file_rw))
 #define EVLEN_NET_CONNECT (sizeof(struct event_hdr) + sizeof(struct ev_net_connect))
 
 /* Compile-time ABI guards: if any of these fire, bump AGENTLOUPE_ABI_VERSION
@@ -484,6 +513,8 @@ _Static_assert(sizeof(struct ev_exit) == 32, "ev_exit ABI changed");
 _Static_assert(sizeof(struct ev_file_open) == 536, "ev_file_open ABI changed");
 _Static_assert(sizeof(struct ev_file_chmod) == 528, "ev_file_chmod ABI changed");
 _Static_assert(sizeof(struct ev_file_close) == 552, "ev_file_close ABI changed");
+_Static_assert(sizeof(struct ev_file_rw) == 552, "ev_file_rw ABI changed");
+_Static_assert(sizeof(struct agentloupe_config) == 32, "agentloupe_config ABI changed");
 _Static_assert(sizeof(struct session_info) == 88, "session_info ABI changed");
 _Static_assert(sizeof(struct tracked_session) == 8, "tracked_session ABI changed");
 _Static_assert(sizeof(struct fd_info) == 568, "fd_info ABI changed");

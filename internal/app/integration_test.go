@@ -44,6 +44,7 @@ type capturedEvent struct {
 	Protocol     uint8                        `json:"protocol"`
 	DNS          bool                         `json:"dns"`
 	Duration     *uint64                      `json:"duration_ms"`
+	Bytes        *uint64                      `json:"bytes"`
 	ExitCode     int32                        `json:"exit_code"`
 	Reason       string                       `json:"reason"`
 	StillRunning []uint32                     `json:"still_running"`
@@ -285,7 +286,12 @@ func TestIntegrationLoaderObserveOnly(t *testing.T) {
 			Output:               outFile,
 			StatsInterval:        0,
 			EnableSyscallSummary: true,
-			SyscallInterval:      100 * time.Millisecond,
+			// Slice 2a: per-call read/write events are opt-in; the
+			// workload's 10-byte write to probe.txt must surface as a
+			// file_write with bytes=10. Byte accounting stays off to
+			// prove rw events work without it.
+			EnableFileRWEvents: true,
+			SyscallInterval:    100 * time.Millisecond,
 		})
 		close(loaderDone)
 	}()
@@ -447,6 +453,8 @@ FOUND:
 	// UDP connect must be visible (protocol 17) alongside TCP.
 	var udpEv *capturedEvent
 	var closeEv *capturedEvent
+	var writeEv *capturedEvent
+	var readEv *capturedEvent
 	for i := range events {
 		ev := &events[i]
 		if ev.Type == "net_connect" && ev.PID == uint32(lastWorkload.pyPID) && ev.Protocol == 17 {
@@ -454,6 +462,14 @@ FOUND:
 		}
 		if ev.Type == "file_close" && ev.PID == uint32(lastWorkload.pyPID) {
 			closeEv = ev
+		}
+		// Slice 2a: the workload's 10-byte write to probe.txt must
+		// surface as a discrete file_write with this call's bytes.
+		if ev.Type == "file_write" && ev.PID == uint32(lastWorkload.pyPID) && ev.Path == targetFile {
+			writeEv = ev
+		}
+		if ev.Type == "file_read" && ev.PID == uint32(lastWorkload.pyPID) {
+			readEv = ev
 		}
 	}
 	if udpEv == nil {
@@ -467,11 +483,24 @@ FOUND:
 	if closeEv != nil && closeEv.Duration == nil {
 		fail("file_close present but duration_ms missing: %s", closeEv.Raw)
 	}
+	if writeEv == nil {
+		fail("missing file_write for %s (pid %d) despite --enable-file-rw-events", targetFile, lastWorkload.pyPID)
+	}
+	if writeEv.Bytes == nil || *writeEv.Bytes != 10 {
+		fail("file_write bytes = %v, want 10 (one 10-byte write call): %s", writeEv.Bytes, writeEv.Raw)
+	}
+	if writeEv.AgentName != agentName {
+		fail("file_write agent_name = %q, want %q", writeEv.AgentName, agentName)
+	}
+	if readEv == nil {
+		fail("missing file_read for workload interpreter (pid %d) despite --enable-file-rw-events", lastWorkload.pyPID)
+	}
 
 	if pyExec.SessionID == 0 || fileOpen.SessionID != pyExec.SessionID ||
-		connect.SessionID != pyExec.SessionID || trueExec.SessionID == 0 {
-		fail("session IDs disagree: exec=%d file_open=%d connect=%d child_exec=%d",
-			pyExec.SessionID, fileOpen.SessionID, connect.SessionID, trueExec.SessionID)
+		connect.SessionID != pyExec.SessionID || trueExec.SessionID == 0 ||
+		writeEv.SessionID != pyExec.SessionID {
+		fail("session IDs disagree: exec=%d file_open=%d connect=%d child_exec=%d file_write=%d",
+			pyExec.SessionID, fileOpen.SessionID, connect.SessionID, trueExec.SessionID, writeEv.SessionID)
 	}
 
 	// Our programs, for the post-shutdown link cross-reference.
@@ -492,7 +521,7 @@ FOUND:
 		fail("reading stats map: %v", err)
 	}
 	var totalDrops, totalEmitted uint64
-	for typ := uint32(1); typ <= 12; typ++ {
+	for typ := uint32(1); typ <= 14; typ++ {
 		vals := make([]statVal, possibleCPUs())
 		key := typ
 		if err := statsMap.Lookup(&key, &vals); err != nil {
