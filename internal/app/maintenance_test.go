@@ -79,4 +79,80 @@ func TestBuildRequestsModes(t *testing.T) {
 			t.Errorf("core hook %s missing from a mode (lsm=%v tp=%v)", core, lsm[core], tp[core])
 		}
 	}
+	// The vfs fexit probes attach when byte accounting OR per-call
+	// read/write events are enabled (slice 2a); rw events work without
+	// the cumulative counters.
+	rwOnly := names(buildRequests(true, Options{EnableFileRWEvents: true}))
+	for _, p := range []string{"handle_vfs_read", "handle_vfs_write", "handle_vfs_readv", "handle_vfs_writev"} {
+		if !rwOnly[p] {
+			t.Errorf("rw-only set missing vfs probe %s: %v", p, rwOnly)
+		}
+	}
+	// Slice 2b: the fentry latency probes ride the same flag with their
+	// own tag, so a bad fentry prototype degrades to zero durations
+	// instead of losing the fexit events.
+	rwTags := func(reqs []progReq) map[string]string {
+		out := map[string]string{}
+		for _, r := range reqs {
+			out[r.Name] = r.Tag
+		}
+		return out
+	}(buildRequests(true, Options{EnableFileRWEvents: true}))
+	for _, p := range []string{"handle_vfs_read_entry", "handle_vfs_write_entry", "handle_vfs_readv_entry", "handle_vfs_writev_entry"} {
+		if !rwOnly[p] {
+			t.Errorf("rw-only set missing fentry latency probe %s: %v", p, rwOnly)
+		}
+		if rwTags[p] != "lat" {
+			t.Errorf("fentry latency probe %s has tag %q, want %q", p, rwTags[p], "lat")
+		}
+	}
+	if names(buildRequests(true, Options{}))["handle_vfs_read"] {
+		t.Errorf("default set must not attach vfs probes: per-call I/O is opt-in")
+	}
+	if names(buildRequests(true, Options{}))["handle_vfs_read_entry"] {
+		t.Errorf("default set must not attach fentry latency probes: per-call I/O is opt-in")
+	}
+	// Slice 3: the sendmsg fexit probes ride their own flag with their
+	// own tag, so a bad sendmsg prototype degrades to no send events
+	// instead of losing connects.
+	sendOnly := names(buildRequests(true, Options{EnableNetSendEvents: true}))
+	for _, p := range []string{"handle_tcp_sendmsg", "handle_udp_sendmsg"} {
+		if !sendOnly[p] {
+			t.Errorf("send-only set missing send probe %s: %v", p, sendOnly)
+		}
+	}
+	sendTags := func(reqs []progReq) map[string]string {
+		out := map[string]string{}
+		for _, r := range reqs {
+			out[r.Name] = r.Tag
+		}
+		return out
+	}(buildRequests(true, Options{EnableNetSendEvents: true}))
+	for _, p := range []string{"handle_tcp_sendmsg", "handle_udp_sendmsg"} {
+		if sendTags[p] != "netsend" {
+			t.Errorf("send probe %s has tag %q, want %q", p, sendTags[p], "netsend")
+		}
+	}
+	if names(buildRequests(true, Options{}))["handle_tcp_sendmsg"] {
+		t.Errorf("default set must not attach send probes: per-call sends are opt-in")
+	}
+	// Slice 4: the sys_enter hostname parser rides the same flag with
+	// its own tag, so a verifier rejection degrades to empty hostnames
+	// instead of losing the send events.
+	if names(buildRequests(true, Options{EnableNetSendEvents: true}))["handle_send_enter"] != true {
+		t.Errorf("send-only set missing hostname parser handle_send_enter")
+	}
+	hostTags := func(reqs []progReq) map[string]string {
+		out := map[string]string{}
+		for _, r := range reqs {
+			out[r.Name] = r.Tag
+		}
+		return out
+	}(buildRequests(true, Options{EnableNetSendEvents: true}))
+	if hostTags["handle_send_enter"] != "sndhost" {
+		t.Errorf("hostname parser has tag %q, want %q", hostTags["handle_send_enter"], "sndhost")
+	}
+	if names(buildRequests(true, Options{}))["handle_send_enter"] {
+		t.Errorf("default set must not attach the hostname parser: per-call sends are opt-in")
+	}
 }

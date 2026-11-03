@@ -48,6 +48,8 @@ func main() {
 	flag.StringVar(&o.Output, "output", "-", "JSONL output: file path or - for stdout")
 	flag.DurationVar(&maxRuntime, "max-runtime", 0, "stop automatically after this duration (0 = run until signal)")
 	flag.BoolVar(&o.EnableIOAccounting, "enable-io-accounting", false, "opt-in: fexit vfs_read/vfs_write{,v} byte accounting + file_close events (benchmark first: make bench-io)")
+	flag.BoolVar(&o.EnableFileRWEvents, "enable-file-rw-events", false, "opt-in: discrete file_read/file_write event per vfs call (size + timestamps only; works without --enable-io-accounting)")
+	flag.BoolVar(&o.EnableNetSendEvents, "enable-net-send-events", false, "opt-in: discrete net_send event per tcp/udp_sendmsg call (this call's bytes + destination, plus the DNS qname / TLS SNI parsed from the send buffer; empty when the buffer holds no name) and a net_recv event per tcp/udp_recvmsg call carrying this call's bytes plus latency_us, the microseconds from the matching send on the same thread/socket to this recv (time-to-first-byte; 0 when no send was seen)")
 	flag.BoolVar(&o.EnableSyscallSummary, "enable-syscall-summary", false, "opt-in: per-(session, syscall) counts via raw_tp/sys_enter")
 	flag.BoolVar(&o.EnableFileMutations, "enable-file-mutations", false, "deprecated no-op: unlink/rename/chmod events are core since slice 1 and always attached")
 	flag.DurationVar(&o.StatsInterval, "stats-interval", 10*time.Second, "how often to print drop/map-full counters (0 = only on shutdown)")

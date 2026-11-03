@@ -836,6 +836,15 @@ static __always_inline int pending_finish(long ret, __u32 op)
 #define NR_openat2 437
 #endif
 
+/* Slice 4 send syscalls (x86_64; same arch assumption as above). Plain
+ * send() is libc sugar over sendto, so these three cover every send path;
+ * recvmmsg has no send-side twin to worry about. */
+#ifndef NR_sendto
+#define NR_sendto 44
+#define NR_sendmsg 46
+#define NR_sendmmsg 307
+#endif
+
 struct sys_raw_args {
 	__u64 args[2]; /* (struct pt_regs *regs, long id_or_ret) */
 };
@@ -901,6 +910,88 @@ int handle_file_sys_exit(struct sys_raw_args *ctx)
  * The Stage 3 gate for enabling this by default is `make bench-io`.
  * ==================================================================== */
 
+/* Per-call read/write events (ABI v5, slice 2a): one discrete event per
+ * vfs_read/write{,v} call on a tracked file, carrying this call's byte
+ * count plus kernel timestamps. Opt-in via enable_file_rw_events (slot
+ * 5): host-wide vfs traffic makes this far too loud to be default. Runs
+ * in the caller's process context, so fill_hdr's task-NULL path still
+ * stamps the right comm/uid; the tgid stamped is the caller's, while
+ * session attribution comes from fd_info (the opener's session), exactly
+ * like file_close. duration_us comes from slice 2b fentry pairing
+ * (rw_take_duration); callers pass 0 when the fentry side is off. Only
+ * called when slot 5 is on — the gate lives in account_io so the
+ * exit-side in-flight lookup (and the entry-side map traffic) costs
+ * nothing when the feature is off. */
+static __always_inline void emit_file_rw(struct fd_info *info, __u64 key,
+					 __u64 bytes, bool is_write,
+					 __u64 duration_us)
+{
+	struct session_info sinfo = {};
+	struct event_hdr *hdr;
+	struct ev_file_rw *ev;
+	__u32 type = is_write ? EVENT_FILE_WRITE : EVENT_FILE_READ;
+	__u32 evlen = is_write ? EVLEN_FILE_WRITE : EVLEN_FILE_READ;
+	int i;
+
+	if (load_session_info(info->session_id, &sinfo) &&
+	    sinfo.state != SESSION_STATE_REJECTED) {
+		hdr = reserve_event(type, evlen, info->session_id, &sinfo,
+				    NULL, cur_tgid());
+		if (hdr) {
+			ev = (struct ev_file_rw *)(void *)(hdr + 1);
+#pragma unroll
+			for (i = 0; i < MAX_PATH_LEN; i++)
+				ev->path[i] = info->path[i];
+			ev->file_ptr = key;
+			ev->bytes = bytes;
+			ev->open_ts_ns = info->open_ts_ns;
+			ev->duration_us = duration_us;
+			ev->path_src = info->path_src;
+			submit_event(hdr, type);
+		}
+	}
+}
+
+/* Slice 2b entry side: stamp this thread's vfs_read/write{,v} entry time.
+ * Gated on slot 5 and on scope (tracked, non-pseudo) so the map holds
+ * only entries the fexit side can consume — every other host call costs
+ * one config check + one session lookup and nothing else. */
+static __always_inline void rw_entry(struct file *file)
+{
+	struct rw_inflight_key key;
+	__u64 sid = 0, now;
+
+	if (!cfg_enabled(5))
+		return;
+	if (!tracked_sid(cur_tgid(), &sid) || file_is_pseudo(file))
+		return;
+	key.pid_tgid = bpf_get_current_pid_tgid();
+	key.file = (unsigned long)file;
+	now = bpf_ktime_get_ns();
+	bpf_map_update_elem(&rw_inflight, &key, &now, BPF_ANY);
+}
+
+/* Slice 2b exit side: consume this thread's entry timestamp for file and
+ * return the latency in microseconds, or 0 when no entry exists (entry
+ * probe missed, fentry degraded/never attached, or LRU-evicted — the
+ * event still goes out with full attribution, just no latency). */
+static __always_inline __u64 rw_take_duration(__u64 key_file)
+{
+	struct rw_inflight_key key;
+	__u64 *entry, now, dur = 0;
+
+	key.pid_tgid = bpf_get_current_pid_tgid();
+	key.file = key_file;
+	entry = bpf_map_lookup_elem(&rw_inflight, &key);
+	if (!entry)
+		return 0;
+	now = bpf_ktime_get_ns();
+	if (now > *entry)
+		dur = now - *entry;
+	bpf_map_delete_elem(&rw_inflight, &key);
+	return dur / 1000; /* ns -> us; sub-microsecond reads as 0 */
+}
+
 static __always_inline void account_io(struct file *file, long ret, bool is_write)
 {
 	struct fd_info *info;
@@ -927,7 +1018,9 @@ static __always_inline void account_io(struct file *file, long ret, bool is_writ
 		bool partial = false;
 		__u8 src;
 
-		if (!cfg_enabled(2))
+		/* Lazy entries serve both byte counting (slot 2) and per-call
+		 * read/write events (slot 5): create when either is on. */
+		if (!cfg_enabled(2) && !cfg_enabled(5))
 			return;
 		if (!tracked_sid(cur_tgid(), &sid) || file_is_pseudo(file))
 			return;
@@ -941,12 +1034,54 @@ static __always_inline void account_io(struct file *file, long ret, bool is_writ
 			return;
 		info = created;
 	}
-	if (!cfg_enabled(2))
-		return;
-	if (is_write)
-		__sync_fetch_and_add(&info->write_bytes, (__u64)ret);
-	else
-		__sync_fetch_and_add(&info->read_bytes, (__u64)ret);
+	if (cfg_enabled(2)) {
+		if (is_write)
+			__sync_fetch_and_add(&info->write_bytes, (__u64)ret);
+		else
+			__sync_fetch_and_add(&info->read_bytes, (__u64)ret);
+	}
+	/* Per-call event, independent of the cumulative counters above:
+	 * --enable-file-rw-events works without --enable-io-accounting.
+	 * The single slot-5 gate here covers the emit AND the exit-side
+	 * in-flight lookup (rw_take_duration): with the feature off, this
+	 * tail costs nothing and the fentry probes record nothing either. */
+	if (cfg_enabled(5))
+		emit_file_rw(info, key, (__u64)ret, is_write,
+			     rw_take_duration(key));
+}
+
+SEC("fentry/vfs_read")
+int BPF_PROG(handle_vfs_read_entry, struct file *file, char *buf,
+	     size_t count, loff_t *pos)
+{
+	rw_entry(file);
+	return 0;
+}
+
+SEC("fentry/vfs_write")
+int BPF_PROG(handle_vfs_write_entry, struct file *file, const char *buf,
+	     size_t count, loff_t *pos)
+{
+	rw_entry(file);
+	return 0;
+}
+
+SEC("fentry/vfs_readv")
+int BPF_PROG(handle_vfs_readv_entry, struct file *file,
+	     const struct iovec *vec, unsigned long vlen, loff_t *pos,
+	     rwf_t flags)
+{
+	rw_entry(file);
+	return 0;
+}
+
+SEC("fentry/vfs_writev")
+int BPF_PROG(handle_vfs_writev_entry, struct file *file,
+	     const struct iovec *vec, unsigned long vlen, loff_t *pos,
+	     rwf_t flags)
+{
+	rw_entry(file);
+	return 0;
 }
 
 SEC("fexit/vfs_read")
@@ -1103,6 +1238,596 @@ int handle_enter_connect(struct sys_enter_ctx *ctx)
 			ev->flags |= 1; /* DNS */
 	}
 	submit_event(hdr, EVENT_NET_CONNECT);
+	return 0;
+}
+
+/* Slice 4: send-buffer hostnames (DNS qname / TLS SNI) for net_send.
+ *
+ * The fexit side (emit_net_send below) sees kernel iov_iter state whose
+ * layout is CO-RE-fragile across kernels, so parsing happens here at
+ * raw_tp/sys_enter, where the syscall's buffer arguments are stable
+ * userspace pointers: the direct buf for sendto, iov[0] of the user
+ * msghdr for sendmsg, and the first datagram's msghdr for sendmmsg
+ * (batched datagrams past the first share its hostname — documented in
+ * the map comment in agentloupe.h). send() is libc sugar over sendto,
+ * so syscalls 44/46/307 cover every send path on x86_64.
+ *
+ * The parse result is stashed in snd_hostnames keyed on pid_tgid and
+ * consumed + deleted by the matching fexit; a thread runs one send at a
+ * time, so each fexit consumes exactly its own enter's parse. Either
+ * parser failing — or the buffer holding no parseable name — yields an
+ * empty hostname, never a dropped event: validation degrades to
+ * unattributed, not to lost. The parsed name is DNS-only for SOCK_DGRAM
+ * and SNI-only for SOCK_STREAM, which kills the false positives (raw UDP
+ * payloads are never TLS-parsed, raw TCP payloads never DNS-parsed).
+ * Both parsers are __always_inline with int (0/1) returns: as __noinline
+ * bool subprograms the verifier rejected handle_send_enter with
+ * "cannot return stack pointer to the caller" (the store-address temp
+ * in R0 merges with the 1-byte bool return at the shared epilogue).
+ * There is a single caller, so inlining costs nothing extra, and the
+ * combined frame (288B parse window + 64B name + parser locals) stays
+ * well under the 512B stack limit.
+ *
+ * SND_PARSE_MAX covers the longest storable DNS name (12B header +
+ * bounded qname + trailer: a longer qname can never fit whole in the
+ * event, so copying past this window is pointless) and typical
+ * ClientHello SNI offsets; a deeper SNI parses to empty. */
+#define SND_PARSE_MAX 288
+
+/* DNS query name (SOCK_DGRAM buffers only). Strict: QR == 0 (responses
+ * are not queries, even when they echo a single question), one question
+ * (QDCOUNT == 1), no answer/authority/additional sections, plain labels
+ * (no compression pointers — those belong to responses), label bytes
+ * [A-Za-z0-9_-], whole dotted name fitting with its NUL. Anything else —
+ * including the root query, which names nothing — returns false. */
+/* Stack stores use idx & 63 (a runtime no-op under the proven bounds):
+ * the verifier tracks olen and j as independent ranges, so without the
+ * mask it cannot prove the variable-offset write in-bounds (cf.
+ * path_via_walk's & 511). */
+static __always_inline int parse_dns_qname(const unsigned char *buf, __u32 n, char *out)
+{
+	__u32 off = 12, olen = 0;
+	int done = 0, ok = 1;
+	int i, j;
+
+	if (n > SND_PARSE_MAX) /* belt and braces: the caller caps this */
+		return 0;
+	if (n < 17) /* header + root qname + qtype/qclass */
+		return 0;
+	if (buf[2] & 0x80) /* QR: a response is not a query */
+		return 0;
+	if (buf[4] != 0 || buf[5] != 1) /* QDCOUNT == 1 */
+		return 0;
+	if (buf[6] || buf[7] || buf[8] || buf[9] || buf[10] || buf[11])
+		return 0; /* a query carries no answer/auth/additional */
+	for (i = 0; i < 32; i++) { /* 32 labels is past any real qname */
+		unsigned char L;
+
+		if (off >= n) {
+			ok = 0;
+			break;
+		}
+		L = buf[off];
+		if (L == 0) {
+			off++;
+			done = 1;
+			break;
+		}
+		if (L & 0xC0) { /* compression pointer: not a query name */
+			ok = 0;
+			break;
+		}
+		if (L > 63 || off + 1 + (__u32)L > n) {
+			ok = 0;
+			break;
+		}
+		if (olen + (__u32)L + 1 > MAX_HOSTNAME_LEN - 1) {
+			ok = 0; /* would not fit whole: leave empty */
+			break;
+		}
+		for (j = 0; j < 63; j++) {
+			char c;
+
+			if ((__u32)j >= (__u32)L)
+				break;
+			c = (char)buf[off + 1 + (__u32)j];
+			if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+			      (c >= '0' && c <= '9') || c == '-' || c == '_')) {
+				ok = 0;
+				break;
+			}
+			out[(olen + (__u32)j) & (MAX_HOSTNAME_LEN - 1)] = c;
+		}
+		if (!ok)
+			break;
+		off += 1 + (__u32)L;
+		olen += (__u32)L;
+		out[olen & (MAX_HOSTNAME_LEN - 1)] = '.';
+		olen++;
+	}
+	if (!ok || !done)
+		return 0;
+	if (off + 4 > n) /* qtype + qclass must be present */
+		return 0;
+	if (olen == 0) /* root query: names nothing */
+		return 0;
+	out[(olen - 1) & (MAX_HOSTNAME_LEN - 1)] = '\0'; /* trailing dot -> terminator */
+	return 1;
+}
+
+/* TLS ClientHello SNI (SOCK_STREAM buffers only). Strict: handshake
+ * record, client_hello, every length field validated against the record
+ * before it is trusted, extensions walked to server_name, first host_name
+ * entry copied when 1..63 bytes of [A-Za-z0-9.-]. Raw (non-TLS) TCP
+ * payloads fail the record/hello checks and parse to empty. */
+/* The copy store uses j & 63 (a runtime no-op: j < name_len <= 63) so the
+ * verifier sees a bounded stack write (see parse_dns_qname). */
+static __always_inline int parse_tls_sni(const unsigned char *buf, __u32 n, char *out)
+{
+	__u32 rec_len, hs_len, pos, ext_end, elen32, list32, nm_len32;
+	__u16 etype, elen, list_len, name_len;
+	int found = 0, ok = 1;
+	int i, j;
+
+	if (n > SND_PARSE_MAX) /* belt and braces: the caller caps this */
+		return 0;
+	if (n < 52) /* record + hs hdr + version + random + min rest */
+		return 0;
+	if (buf[0] != 0x16) /* TLS handshake record */
+		return 0;
+	rec_len = ((__u32)buf[3] << 8) | buf[4];
+	if (rec_len < 46 || 5 + rec_len > n)
+		return 0; /* record must end inside this send */
+	if (buf[5] != 0x01) /* client_hello */
+		return 0;
+	hs_len = ((__u32)buf[6] << 16) | ((__u32)buf[7] << 8) | buf[8];
+	if (4 + hs_len > rec_len)
+		return 0;
+	pos = 5 + 4 + 2 + 32; /* record + hs headers, version, random */
+	if (pos >= 5 + rec_len)
+		return 0;
+	pos += 1 + buf[pos]; /* session_id */
+	if (pos + 2 > 5 + rec_len)
+		return 0;
+	elen = ((__u16)buf[pos] << 8) | buf[pos + 1]; /* cipher_suites */
+	pos += 2 + elen;
+	if (pos + 1 > 5 + rec_len)
+		return 0;
+	pos += 1 + buf[pos]; /* compression_methods */
+	if (pos + 2 > 5 + rec_len)
+		return 0;
+	elen = ((__u16)buf[pos] << 8) | buf[pos + 1]; /* extensions */
+	pos += 2;
+	ext_end = pos + elen;
+	if (ext_end > 5 + rec_len)
+		return 0;
+	for (i = 0; i < 16; i++) { /* past any real extension count */
+		if (pos + 4 > ext_end)
+			break;
+		etype = ((__u16)buf[pos] << 8) | buf[pos + 1];
+		elen = ((__u16)buf[pos + 2] << 8) | buf[pos + 3];
+		elen32 = elen;
+		if (pos + 4 + elen32 > ext_end) {
+			ok = 0;
+			break;
+		}
+		if (etype != 0) { /* not server_name: skip */
+			pos += 4 + elen32;
+			continue;
+		}
+		/* server_name: list_len + entries of (type, len, name). */
+		if (elen32 < 6) { /* list_len + smallest host_name entry */
+			ok = 0;
+			break;
+		}
+		if (pos + 6 > ext_end) { /* list_len bytes must be in-bounds */
+			ok = 0;
+			break;
+		}
+		list_len = ((__u16)buf[pos + 4] << 8) | buf[pos + 5];
+		list32 = list_len;
+		if (2 + list32 > elen32) {
+			ok = 0;
+			break;
+		}
+		pos += 6; /* first entry */
+		if (pos + 3 > ext_end) { /* type + len bytes in-bounds */
+			ok = 0;
+			break;
+		}
+		if (buf[pos] != 0) { /* host_name */
+			ok = 0;
+			break;
+		}
+		name_len = ((__u16)buf[pos + 1] << 8) | buf[pos + 2];
+		if (name_len == 0 || name_len > MAX_HOSTNAME_LEN - 1) {
+			ok = 0;
+			break;
+		}
+		nm_len32 = name_len;
+		if (3 + nm_len32 > list32) { /* entry fits its list */
+			ok = 0;
+			break;
+		}
+		for (j = 0; j < MAX_HOSTNAME_LEN - 1; j++) {
+			char c;
+
+			if ((__u32)j >= nm_len32)
+				break;
+			c = (char)buf[pos + 3 + (__u32)j];
+			if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+			      (c >= '0' && c <= '9') || c == '-' || c == '.')) {
+				ok = 0;
+				break;
+			}
+			out[(__u32)j & (MAX_HOSTNAME_LEN - 1)] = c;
+		}
+		if (!ok)
+			break;
+		out[nm_len32 & (MAX_HOSTNAME_LEN - 1)] = '\0';
+		found = 1;
+		break;
+	}
+	if (!ok)
+		return 0;
+	return found;
+}
+
+/* Sys_enter for sendto/sendmsg/sendmmsg: parse this call's buffer for a
+ * DNS qname (DGRAM) or TLS SNI (STREAM) and stash it for the fexit.
+ * Gated on slot 6 (same flag as net_send itself: no sends, no hostnames)
+ * and on scope BEFORE the fd-table walk, so untracked processes cost two
+ * map lookups and nothing else. Always overwrites the thread's entry —
+ * even with an empty name — so a raw-payload send can never inherit a
+ * previous send's hostname. */
+SEC("raw_tp/sys_enter")
+int handle_send_enter(struct sys_raw_args *ctx)
+{
+	struct pt_regs *regs = (struct pt_regs *)(unsigned long)ctx->args[0];
+	long nr = (long)ctx->args[1];
+	struct snd_hostname host = {};
+	unsigned char kbuf[SND_PARSE_MAX];
+	const void *ubuf = NULL;
+	__u64 pid_tgid, si, ulen = 0;
+	__u32 n = 0;
+	int stype;
+
+	if (!regs)
+		return 0;
+	if (nr != NR_sendto && nr != NR_sendmsg && nr != NR_sendmmsg)
+		return 0;
+	if (!cfg_enabled(6))
+		return 0;
+	if (!tracked_sid(cur_tgid(), NULL))
+		return 0;
+	si = BPF_CORE_READ(regs, si);
+	/* SOCK_STREAM / SOCK_DGRAM only: anything else (raw, seqpacket)
+	 * has no sendmsg fexit to consume a parse, so skip the work. */
+	stype = socket_type_from_fd((int)BPF_CORE_READ(regs, di));
+	if (stype != 1 && stype != 2)
+		return 0;
+	if (nr == NR_sendto) {
+		ubuf = (const void *)(unsigned long)si;
+		ulen = BPF_CORE_READ(regs, dx);
+	} else {
+		/* sendmsg: user msghdr at si; sendmmsg: first mmsghdr's
+		 * msg_hdr at the same offset (identical layout: name,
+		 * namelen, iov, iovlen). Only iov[0] is parsed — the
+		 * ClientHello / DNS query lives there in practice. */
+		__u64 iov_ptr = 0, iovlen = 0, base = 0, blen = 0;
+
+		if (bpf_probe_read_user(&iov_ptr, sizeof(iov_ptr),
+					(const void *)(unsigned long)(si + 16)) < 0)
+			goto store;
+		if (bpf_probe_read_user(&iovlen, sizeof(iovlen),
+					(const void *)(unsigned long)(si + 24)) < 0)
+			goto store;
+		if (iovlen < 1 || !iov_ptr)
+			goto store;
+		if (bpf_probe_read_user(&base, sizeof(base),
+					(const void *)(unsigned long)iov_ptr) < 0)
+			goto store;
+		if (bpf_probe_read_user(&blen, sizeof(blen),
+					(const void *)(unsigned long)(iov_ptr + 8)) < 0)
+			goto store;
+		if (!base || !blen)
+			goto store;
+		ubuf = (const void *)(unsigned long)base;
+		ulen = blen;
+	}
+	if (ubuf && ulen) {
+		n = ulen > SND_PARSE_MAX ? SND_PARSE_MAX : (__u32)ulen;
+		if (n > 0 && bpf_probe_read_user(kbuf, n, ubuf) == 0) {
+			if (stype == 2)
+				parse_dns_qname(kbuf, n, host.name);
+			else
+				parse_tls_sni(kbuf, n, host.name);
+		}
+	}
+store:
+	pid_tgid = bpf_get_current_pid_tgid();
+	bpf_map_update_elem(&snd_hostnames, &pid_tgid, &host, BPF_ANY);
+	return 0;
+}
+
+/* Resolve this call's peer into (daddr, family, dport). Shared by the
+ * send and recv emitters so both halves of a call carry the same endpoint
+ * identity. Unconnected UDP takes the per-call address from msg->msg_name;
+ * everything else falls back to the sock's peer fields.
+ *
+ * name_is_user selects the probe: on the SEND fexit msg_name points at a
+ * kernel-stack copy (___sys_sendmsg/__sys_sendto copy the sockaddr there
+ * and rewrite msg_name to point at it), so the send side reads _kernel;
+ * on the RECV fexit the recv path never rewrites msg_name — it still
+ * points at the caller's buffer, already filled with the source address by
+ * the protocol's recvmsg — so the recv side reads _user. A failed or
+ * unparseable name is NOT an error: the sock fallback below still runs.
+ * Only a sock with no usable peer (non-INET family) returns false, in
+ * which case there is nothing to attribute. */
+static __always_inline bool
+net_dest(struct sock *sk, struct msghdr *msg, bool is_udp, bool name_is_user,
+	 unsigned char *daddr, __u16 *family, __u16 *dport)
+{
+	if (is_udp && msg) {
+		if (BPF_CORE_READ(msg, msg_namelen) != 0) {
+			const void *name = BPF_CORE_READ(msg, msg_name);
+			unsigned char sa[28] = {};
+			int rc;
+
+			if (!name)
+				goto sock;
+			rc = name_is_user ?
+				bpf_probe_read_user(sa, sizeof(sa), name) :
+				bpf_probe_read_kernel(sa, sizeof(sa), name);
+			if (rc == 0) {
+				__u16 f = (__u16)sa[0] | ((__u16)sa[1] << 8);
+
+				if (f == AF_INET) {
+					*family = f;
+					*dport = ((__u16)sa[2] << 8) | sa[3];
+					__builtin_memcpy(daddr, &sa[4], 4);
+					return true;
+				} else if (f == AF_INET6) {
+					*family = f;
+					*dport = ((__u16)sa[2] << 8) | sa[3];
+					__builtin_memcpy(daddr, &sa[8], 16);
+					return true;
+				}
+			}
+		}
+	}
+sock:
+	*family = BPF_CORE_READ(sk, __sk_common.skc_family);
+	if (*family != AF_INET && *family != AF_INET6)
+		return false;
+	if (*family == AF_INET) {
+		__u32 a = BPF_CORE_READ(sk, __sk_common.skc_daddr);
+
+		__builtin_memcpy(daddr, &a, 4);
+	} else {
+		struct in6_addr a6 = BPF_CORE_READ(sk, __sk_common.skc_v6_daddr);
+
+		__builtin_memcpy(daddr, &a6, 16);
+	}
+	*dport = bpf_ntohs(BPF_CORE_READ(sk, __sk_common.skc_dport));
+	return true;
+}
+
+/* Slice 3: one discrete event per tcp/udp_sendmsg call on a tracked
+ * socket, carrying this call's byte count and destination — the
+ * network-side equivalent of slice 2a. Opt-in via enable_net_send_events
+ * (slot 6): per-send volume is as loud as per-call rw events. Only
+ * successful calls emit (the callers skip ret <= 0, like account_io):
+ * there is no errno to report and nothing to attribute on failure.
+ * TCP destination always comes from the sock; UDP additionally consults
+ * msg->msg_name for unconnected sends (connected UDP falls back to the
+ * sock, same as TCP). Runs in the caller's process context;
+ * resolve_scope attributes to the sender's session exactly like
+ * net_connect (no REJECTED check, mirroring connect). Destination is
+ * fully validated BEFORE reserve_event: a post-reserve early return
+ * would leak the reservation. Slice 5 stamps every emitted send in
+ * send_inflight (keyed on (thread, sock)) for the recv side to pair
+ * against; the shared net_dest helper above resolves the peer for both
+ * emitters (send reads msg_name as _kernel, recv as _user — see its
+ * comment for why they differ). */
+static __always_inline void
+emit_net_send(struct sock *sk, struct msghdr *msg, __u64 bytes, bool is_udp)
+{
+	struct session_info info = {};
+	struct event_hdr *hdr;
+	struct ev_net_send *ev;
+	unsigned char daddr[16] = {};
+	__u64 sid = 0, cgid = 0;
+	__u32 tgid = cur_tgid();
+	__u16 family = 0, dport = 0;
+	__u8 proto = is_udp ? IPPROTO_UDP : IPPROTO_TCP;
+
+	if (!cfg_enabled(6))
+		return;
+	if (!resolve_scope(tgid, cur_task(), &sid, &info, &cgid))
+		return;
+	if (!net_dest(sk, msg, is_udp, false, daddr, &family, &dport))
+		return;
+	hdr = reserve_event(EVENT_NET_SEND, EVLEN_NET_SEND, sid, &info,
+			    cur_task(), tgid);
+	if (!hdr)
+		return;
+	ev = (struct ev_net_send *)(void *)(hdr + 1);
+	ev->family = family;
+	ev->protocol = proto;
+	ev->sport = BPF_CORE_READ(sk, __sk_common.skc_num);
+	__builtin_memcpy(ev->daddr, daddr, 16);
+	if (family == AF_INET) {
+		__u32 saddr = BPF_CORE_READ(sk, __sk_common.skc_rcv_saddr);
+
+		__builtin_memcpy(ev->saddr, &saddr, 4);
+	} else {
+		struct in6_addr saddr6 = BPF_CORE_READ(sk, __sk_common.skc_v6_rcv_saddr);
+
+		__builtin_memcpy(ev->saddr, &saddr6, 16);
+	}
+	ev->dport = dport;
+	if (ev->dport == 53)
+		ev->flags |= 1; /* DNS */
+	ev->bytes = bytes;
+	/* Slices 4+5: consume this thread's sys_enter parse, if any, and
+	 * stamp this send for the recv side to pair against. The reservation
+	 * zero-fills hostname, so a miss (enter skipped, degraded, or never
+	 * attached) simply leaves it empty — on both the event and the
+	 * in-flight entry. The entry is stamped only for emitted sends (a
+	 * failed reservation returns above), so every entry the recv side
+	 * consumes refers to a send the userspace actually saw. */
+	{
+		struct send_inflight_key key;
+		struct send_inflight_val val = {};
+		__u64 tgid_pid = bpf_get_current_pid_tgid();
+		struct snd_hostname *h;
+
+		h = bpf_map_lookup_elem(&snd_hostnames, &tgid_pid);
+		if (h) {
+			__builtin_memcpy(ev->hostname, h->name, MAX_HOSTNAME_LEN);
+			__builtin_memcpy(val.hostname, h->name, MAX_HOSTNAME_LEN);
+			bpf_map_delete_elem(&snd_hostnames, &tgid_pid);
+		}
+		val.send_ts_ns = bpf_ktime_get_ns();
+		key.pid_tgid = tgid_pid;
+		key.sock = (unsigned long)sk;
+		bpf_map_update_elem(&send_inflight, &key, &val, BPF_ANY);
+	}
+	submit_event(hdr, EVENT_NET_SEND);
+}
+
+/* fexit: at exit the return value (bytes accepted) is known. Short and
+ * failed calls (ret <= 0) are skipped — there is nothing to attribute. */
+SEC("fexit/tcp_sendmsg")
+int BPF_PROG(handle_tcp_sendmsg, struct sock *sk, struct msghdr *msg,
+	     size_t size, int ret)
+{
+	(void)msg;
+	(void)size;
+	if (ret <= 0)
+		return 0;
+	emit_net_send(sk, NULL, (__u64)ret, false);
+	return 0;
+}
+
+SEC("fexit/udp_sendmsg")
+int BPF_PROG(handle_udp_sendmsg, struct sock *sk, struct msghdr *msg,
+	     size_t len, int ret)
+{
+	(void)len;
+	if (ret <= 0)
+		return 0;
+	emit_net_send(sk, msg, (__u64)ret, true);
+	return 0;
+}
+
+/* Slice 5: one discrete event per tcp/udp_recvmsg call on a tracked
+ * socket, carrying this call's byte count and the request->response
+ * latency paired from send_inflight — the network-side equivalent of
+ * slice 2b. Opt-in via enable_net_send_events (slot 6): the slot now
+ * gates sends AND recvs, the two halves of one call. Only successful
+ * calls emit (the callers skip ret <= 0, like sends): there is no errno
+ * to report and nothing to attribute on failure. The first recv after a
+ * send measures time-to-first-byte; later recvs on the same socket (a
+ * chunked/streaming response) measure inter-chunk latency against the
+ * same send until the next send overwrites it. A recv with no paired send
+ * — an accepted server-side socket that only ever receives, a
+ * cross-thread send/recv pair, an LRU-evicted entry — still emits with
+ * full attribution but latency_us = 0 and an empty hostname, exactly like
+ * a duration_us = 0 file_rw event. */
+static __always_inline void
+emit_net_recv(struct sock *sk, struct msghdr *msg, __u64 bytes, bool is_udp)
+{
+	struct session_info info = {};
+	struct event_hdr *hdr;
+	struct ev_net_recv *ev;
+	unsigned char daddr[16] = {};
+	char host[MAX_HOSTNAME_LEN] = {};
+	__u64 sid = 0, cgid = 0, latency_us = 0;
+	__u32 tgid = cur_tgid();
+	__u16 family = 0, dport = 0;
+	__u8 proto = is_udp ? IPPROTO_UDP : IPPROTO_TCP;
+
+	if (!cfg_enabled(6))
+		return;
+	if (!resolve_scope(tgid, cur_task(), &sid, &info, &cgid))
+		return;
+	if (!net_dest(sk, msg, is_udp, true, daddr, &family, &dport))
+		return;
+	/* Consume this thread's send on this socket, if any. */
+	{
+		struct send_inflight_key key;
+		struct send_inflight_val *inflight;
+		__u64 now;
+
+		key.pid_tgid = bpf_get_current_pid_tgid();
+		key.sock = (unsigned long)sk;
+		inflight = bpf_map_lookup_elem(&send_inflight, &key);
+		if (inflight) {
+			now = bpf_ktime_get_ns();
+			if (now > inflight->send_ts_ns)
+				latency_us = (now - inflight->send_ts_ns) / 1000;
+			__builtin_memcpy(host, inflight->hostname,
+					 MAX_HOSTNAME_LEN);
+			bpf_map_delete_elem(&send_inflight, &key);
+		}
+	}
+	hdr = reserve_event(EVENT_NET_RECV, EVLEN_NET_RECV, sid, &info,
+			    cur_task(), tgid);
+	if (!hdr)
+		return;
+	ev = (struct ev_net_recv *)(void *)(hdr + 1);
+	ev->family = family;
+	ev->protocol = proto;
+	ev->sport = BPF_CORE_READ(sk, __sk_common.skc_num);
+	__builtin_memcpy(ev->daddr, daddr, 16);
+	if (family == AF_INET) {
+		__u32 saddr = BPF_CORE_READ(sk, __sk_common.skc_rcv_saddr);
+
+		__builtin_memcpy(ev->saddr, &saddr, 4);
+	} else {
+		struct in6_addr saddr6 = BPF_CORE_READ(sk, __sk_common.skc_v6_rcv_saddr);
+
+		__builtin_memcpy(ev->saddr, &saddr6, 16);
+	}
+	ev->dport = dport;
+	if (ev->dport == 53)
+		ev->flags |= 1; /* DNS */
+	ev->bytes = bytes;
+	ev->latency_us = latency_us;
+	__builtin_memcpy(ev->hostname, host, MAX_HOSTNAME_LEN);
+	submit_event(hdr, EVENT_NET_RECV);
+}
+
+/* fexit: at exit the return value (bytes received) is known. Short and
+ * failed calls (ret <= 0) are skipped — there is nothing to attribute.
+ * Declared as the 4-arg (sk, msg, len, flags) prefix: addr_len was removed
+ * from tcp/udp_recvmsg upstream, and declaring it makes the verifier reject
+ * the program on newer kernels ("doesn't have 6-th argument"). The prefix
+ * form also attaches on older kernels that still have addr_len. */
+SEC("fexit/tcp_recvmsg")
+int BPF_PROG(handle_tcp_recvmsg, struct sock *sk, struct msghdr *msg,
+	     size_t len, int flags, int ret)
+{
+	(void)msg;
+	(void)len;
+	(void)flags;
+	if (ret <= 0)
+		return 0;
+	emit_net_recv(sk, NULL, (__u64)ret, false);
+	return 0;
+}
+
+SEC("fexit/udp_recvmsg")
+int BPF_PROG(handle_udp_recvmsg, struct sock *sk, struct msghdr *msg,
+	     size_t len, int flags, int ret)
+{
+	(void)len;
+	(void)flags;
+	if (ret <= 0)
+		return 0;
+	emit_net_recv(sk, msg, (__u64)ret, true);
 	return 0;
 }
 

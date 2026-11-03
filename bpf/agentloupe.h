@@ -56,7 +56,7 @@
 #ifndef AGENTLOUPE_H
 #define AGENTLOUPE_H
 
-#define AGENTLOUPE_ABI_VERSION 4
+#define AGENTLOUPE_ABI_VERSION 8
 
 /* Minimum kernel for full (LSM) mode; the loader enforces this, the
  * header only documents it. Fallback floor is 5.8. */
@@ -71,6 +71,9 @@
 #define MAX_AGENT_CGROUPS    2048   /* resolved cgroup IDs (v2 only)      */
 #define MAX_FILE_INFOS       16384  /* struct file * -> fd_info (LRU)     */
 #define MAX_SYSCALL_COUNTS   65536  /* (session, tgid, nr) counters (LRU): ~64 sessions x 32 procs x 32 nrs */
+#define MAX_IN_FLIGHT_RW     4096   /* (pid_tgid, file) entry timestamps for rw latency (LRU) */
+#define MAX_SND_HOSTNAMES    4096   /* pid_tgid -> parsed DNS/SNI name, consumed per send (LRU) */
+#define MAX_IN_FLIGHT_SEND   4096   /* (pid_tgid, sock) send timestamps + hostname, consumed per recv (LRU) */
 #define RINGBUF_BYTES        (8 * 1024 * 1024)
 
 /* ---- Fixed string sizes (truncation is flagged, never silent) ---------- */
@@ -79,6 +82,10 @@
 #define MAX_PATH_LEN         512    /* file paths, exec filename, cwd     */
 #define MAX_ARGV_LEN         512    /* NUL-joined argv, exec events only  */
 #define MAX_ARGV_ARGS        16     /* argv entries copied at most        */
+#define MAX_HOSTNAME_LEN       64     /* DNS qname / TLS SNI per net_send
+                                      * (ABI v7): complete dotted name plus
+                                      * NUL; names that do not fit whole are
+                                      * left empty, never truncated         */
 
 /* Bounded dentry walk for the tracepoint fallback (scope.h). At the cap,
  * the path is emitted partial (leading components dropped) with
@@ -105,7 +112,11 @@ enum event_type {
 	EVENT_NET_CONNECT   = 10, /* connect() to AF_INET/AF_INET6              */
 	EVENT_SESSION_START = 11, /* userspace-synthesised on confirm/attach    */
 	EVENT_SESSION_END   = 12, /* userspace-synthesised on leader exit       */
-	EVENT_MAX           = 13,
+	EVENT_FILE_READ     = 13, /* fexit vfs_read/readv, opt-in (ABI v5)      */
+	EVENT_FILE_WRITE    = 14, /* fexit vfs_write/writev, opt-in (ABI v5)    */
+	EVENT_NET_SEND      = 15, /* fexit tcp/udp_sendmsg, opt-in (ABI v6)     */
+	EVENT_NET_RECV      = 16, /* fexit tcp/udp_recvmsg, opt-in (ABI v8)     */
+	EVENT_MAX           = 17,
 };
 
 /* How a path string in a payload was obtained. Recorded per path (rename
@@ -320,11 +331,17 @@ struct agentloupe_counters {
 struct agentloupe_config {
 	__u64 run_id;                     /* echoed in every userspace record  */
 	__u32 enable_syscall_summary;     /* gates raw_syscalls:sys_enter body */
-	__u32 enable_file_io_accounting;  /* gates vfs_read/write(v) probes    */
-	__u32 enable_file_mutations;      /* gates unlink/rename/chmod fallback */
+	__u32 enable_file_io_accounting;  /* gates vfs_read/write(v) counting  */
+	__u32 enable_file_mutations;      /* retained for ABI stability: slice 1
+	                                     * made mutations core, always on   */
 	__u32 net_udp_only;               /* enter_connect emits SOCK_DGRAM only
-	                                   * (set when TCP fexit probes attached) */
-};
+	                                     * (set when TCP fexit probes attached) */
+	__u32 enable_file_rw_events;      /* gates per-call read/write events
+	                                     * (ABI v5, slice 2a; size+timestamps
+	                                     * only, no per-call latency yet)  */
+	__u32 enable_net_send_events;      /* gates per-call send AND recv events (ABI v6/v8,
+	                                     * slices 3/5; slice 4 hostnames ride the same slot)  */
+};                                        /* 32 bytes                          */
 
 /* ---- Event records -------------------------------------------------------
  *
@@ -451,6 +468,91 @@ struct ev_file_close {
 	__u8  _pad[7];
 };                                        /* 552 bytes                         */
 
+/*
+ * One read(2)/write(2)-class call on a tracked file (ABI v5, opt-in via
+ * enable_file_rw_events). bytes is THIS call's return value, not a
+ * cumulative total: pairing calls into per-open totals is userspace's
+ * job, keyed on (file_ptr, open_ts_ns) — the same key file_close uses.
+ * duration_us is the call's latency in microseconds, paired by slice 2b
+ * fentry programs (see rw_inflight below). Zero means unknown or
+ * sub-microsecond: the exit side found no entry timestamp (fentry missed,
+ * degraded, or never attached), or the call completed in under a
+ * microsecond.
+ */
+struct ev_file_rw {
+	char  path[MAX_PATH_LEN];
+	__u64 file_ptr;
+	__u64 bytes;                      /* this call's byte count (ret)      */
+	__u64 open_ts_ns;                 /* pairs with file_ptr: one open     */
+	__u64 duration_us;                /* 0 = unknown or sub-microsecond    */
+	__u8  path_src;                   /* enum path_source                  */
+	__u8  _pad[7];
+};                                        /* 552 bytes                         */
+
+/*
+ * One send(2)/sendto(2)/sendmsg(2)-class call on a tracked socket
+ * (ABI v6, opt-in via enable_net_send_events; ABI v7 adds hostname).
+ * bytes is THIS call's return value (ret > 0; short/failed calls are
+ * skipped at the fexit, like account_io's ret <= 0 skip), not a
+ * cumulative total. The first 40 bytes are laid out exactly like
+ * ev_net_connect (addrs, ports, family, protocol, flags) so the decoder
+ * shares its parsing; bytes replaces connect's result/_pad2 tail (sends
+ * have no errno to report — only successful calls emit). hostname is the
+ * DNS query name (SOCK_DGRAM sends) or TLS ClientHello SNI (SOCK_STREAM
+ * sends) parsed from THIS call's send buffer at sys_enter by slice 4's
+ * handle_send_enter and consumed here; empty when the buffer held no
+ * parseable name (raw TCP/UDP payloads), when the name did not fit whole,
+ * or when the enter probe missed. Slice 5 additionally stamps this send in
+ * send_inflight (send_ts_ns + hostname, keyed on (thread, sock)) so the
+ * recv side can pair the response: see ev_net_recv. Slices 3/4 are the
+ * network-side equivalent of slice 2a (attribution first); slice 5 is the
+ * equivalent of slice 2b (latency via pairing).
+ */
+struct ev_net_send {
+	__u8  daddr[16];                  /* IPv4 in first 4 bytes if family=2 */
+	__u8  saddr[16];
+	__u16 dport;                      /* host byte order                   */
+	__u16 sport;                      /* 0 if not yet bound/unknown        */
+	__u16 family;                     /* AF_INET / AF_INET6                */
+	__u8  protocol;                   /* IPPROTO_TCP / UDP                 */
+	__u8  flags;                      /* bit0: DNS (dport 53)              */
+	__u64 bytes;                      /* this call's byte count (ret)      */
+	char  hostname[MAX_HOSTNAME_LEN]; /* DNS qname / TLS SNI, or empty     */
+};                                        /* 112 bytes                         */
+
+/*
+ * One recv(2)/recvfrom(2)/recvmsg(2)-class call on a tracked socket
+ * (ABI v8, opt-in via enable_net_send_events — the slot now gates sends
+ * AND recvs, the two halves of one call). bytes is THIS call's byte count
+ * (ret > 0; short/failed calls are skipped, like sends). latency_us pairs
+ * this recv with the thread's most recent successful send on the SAME
+ * socket (slice 5, via send_inflight): the time from send completion to
+ * recv completion, in microseconds — time-to-first-byte for the first
+ * recv after a request, chunk latency for later ones. Zero means unknown
+ * (no send observed on this socket — e.g. an accepted server-side socket
+ * that only ever receives, a cross-thread send/recv pair, or an
+ * LRU-evicted entry) or sub-microsecond. hostname is the paired send's
+ * name (DNS qname / TLS SNI), so responses carry the same endpoint
+ * identity as their requests without a second parse. Destination: for TCP
+ * and connected UDP the sock's peer; for unconnected UDP recvfrom the
+ * per-call source parsed from msg->msg_name (AT FEXIT THIS IS STILL THE
+ * USER POINTER — the recv path never rewrites it to a kernel copy the way
+ * the send path does — so it is a _user read, the mirror image of the
+ * send-side _kernel read).
+ */
+struct ev_net_recv {
+	__u8  daddr[16];                  /* IPv4 in first 4 bytes if family=2 */
+	__u8  saddr[16];
+	__u16 dport;                      /* host byte order                   */
+	__u16 sport;                      /* 0 if not yet bound/unknown        */
+	__u16 family;                     /* AF_INET / AF_INET6                */
+	__u8  protocol;                   /* IPPROTO_TCP / UDP                 */
+	__u8  flags;                      /* bit0: DNS (dport 53)              */
+	__u64 bytes;                      /* this call's byte count (ret)      */
+	__u64 latency_us;                 /* send->recv delta; 0 = unknown     */
+	char  hostname[MAX_HOSTNAME_LEN]; /* paired from the send, or empty    */
+};                                        /* 120 bytes                         */
+
 struct ev_net_connect {
 	__u8  daddr[16];                  /* IPv4 in first 4 bytes if family=2 */
 	__u8  saddr[16];
@@ -473,7 +575,11 @@ struct ev_net_connect {
 #define EVLEN_FILE_RENAME (sizeof(struct event_hdr) + sizeof(struct ev_file_rename))
 #define EVLEN_FILE_CHMOD (sizeof(struct event_hdr) + sizeof(struct ev_file_chmod))
 #define EVLEN_FILE_CLOSE (sizeof(struct event_hdr) + sizeof(struct ev_file_close))
+#define EVLEN_FILE_READ (sizeof(struct event_hdr) + sizeof(struct ev_file_rw))
+#define EVLEN_FILE_WRITE (sizeof(struct event_hdr) + sizeof(struct ev_file_rw))
 #define EVLEN_NET_CONNECT (sizeof(struct event_hdr) + sizeof(struct ev_net_connect))
+#define EVLEN_NET_SEND (sizeof(struct event_hdr) + sizeof(struct ev_net_send))
+#define EVLEN_NET_RECV (sizeof(struct event_hdr) + sizeof(struct ev_net_recv))
 
 /* Compile-time ABI guards: if any of these fire, bump AGENTLOUPE_ABI_VERSION
  * and update the Go decoder in the same commit. `make check-header` verifies
@@ -484,6 +590,10 @@ _Static_assert(sizeof(struct ev_exit) == 32, "ev_exit ABI changed");
 _Static_assert(sizeof(struct ev_file_open) == 536, "ev_file_open ABI changed");
 _Static_assert(sizeof(struct ev_file_chmod) == 528, "ev_file_chmod ABI changed");
 _Static_assert(sizeof(struct ev_file_close) == 552, "ev_file_close ABI changed");
+_Static_assert(sizeof(struct ev_file_rw) == 552, "ev_file_rw ABI changed");
+_Static_assert(sizeof(struct ev_net_send) == 112, "ev_net_send ABI changed");
+_Static_assert(sizeof(struct ev_net_recv) == 120, "ev_net_recv ABI changed");
+_Static_assert(sizeof(struct agentloupe_config) == 32, "agentloupe_config ABI changed");
 _Static_assert(sizeof(struct session_info) == 88, "session_info ABI changed");
 _Static_assert(sizeof(struct tracked_session) == 8, "tracked_session ABI changed");
 _Static_assert(sizeof(struct fd_info) == 568, "fd_info ABI changed");
@@ -619,6 +729,78 @@ struct {
 	__type(key, __u64);               /* bpf_get_current_pid_tgid()        */
 	__type(value, struct pending_file_op);
 } pending_file_ops SEC(".maps");
+
+/* In-flight vfs_read/write{,v} entry timestamps for per-call latency
+ * (slice 2b). Written by the fentry probes, consumed + deleted by the
+ * fexit side (account_io). Keyed on (thread, file): a thread cannot have
+ * two synchronous vfs calls in flight, and the file pointer disambiguates
+ * any exotic interleaving (io_uring, AIO). LRU is correct: an evicted or
+ * otherwise missing entry just yields duration_us = 0 on that event —
+ * degraded latency, never a lost event. Stale entries (thread died
+ * mid-call without the fexit running) are bounded by max_entries and
+ * eventually evicted; delete-on-consume keeps the live set tiny.
+ * 16 bytes: no size assert needed (key only, never on the ring). */
+struct rw_inflight_key {
+	__u64 pid_tgid;
+	__u64 file;                       /* struct file *                     */
+};
+struct {
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
+	__uint(max_entries, MAX_IN_FLIGHT_RW);
+	__type(key, struct rw_inflight_key);
+	__type(value, __u64);              /* bpf_ktime_get_ns() at entry       */
+} rw_inflight SEC(".maps");
+
+/* Parsed send-buffer hostname per thread, for slice 4 (ABI v7). Written
+ * by the raw_tp/sys_enter probe (handle_send_enter), which sees the
+ * stable userspace buffer pointers, and consumed + deleted by the
+ * tcp/udp_sendmsg fexit (emit_net_send) that attributes the same call.
+ * Keyed on the full pid_tgid: a thread runs one send syscall at a time,
+ * so each fexit consumes exactly its own enter's parse. LRU is correct:
+ * an evicted or otherwise missing entry just yields an empty hostname
+ * on that event — degraded attribution, never a lost event. The entry is
+ * ALWAYS overwritten per in-scope send (even with an empty name), so a
+ * raw-payload send can never inherit a previous send's hostname; the one
+ * known gap is sendmmsg batches, whose per-datagram fexits share the
+ * thread's most recent parse (only the first datagram is parsed at
+ * enter). 64 bytes: no size assert needed (value only, never on the
+ * ring). */
+struct snd_hostname {
+	char name[MAX_HOSTNAME_LEN];
+};
+struct {
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
+	__uint(max_entries, MAX_SND_HOSTNAMES);
+	__type(key, __u64);               /* bpf_get_current_pid_tgid()        */
+	__type(value, struct snd_hostname);
+} snd_hostnames SEC(".maps");
+
+/* In-flight successful sends for request->response pairing (slice 5,
+ * ABI v8). Stamped by the tcp/udp_sendmsg fexit (emit_net_send), consumed
+ * + deleted by the matching tcp/udp_recvmsg fexit (emit_net_recv).
+ * Keyed on (thread, sock): a thread cannot have two synchronous send/recv
+ * pairs in flight, and the sock disambiguates concurrent requests on
+ * different connections. A cross-thread send/recv pair (send on one
+ * thread, recv on another — e.g. a goroutine that migrated) misses and
+ * yields latency_us = 0 on that recv: degraded, never wrong. A socket that
+ * sends but never receives (or whose entry is LRU-evicted) leaves a stale
+ * entry bounded by max_entries; the next send on the same socket
+ * overwrites it. 72-byte value (ts + hostname): no size assert needed
+ * (value only, never on the ring). */
+struct send_inflight_key {
+	__u64 pid_tgid;
+	__u64 sock;                       /* struct sock *                     */
+};
+struct send_inflight_val {
+	__u64 send_ts_ns;                 /* bpf_ktime_get_ns() at send fexit  */
+	char  hostname[MAX_HOSTNAME_LEN]; /* this send's parsed name, or empty */
+};
+struct {
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
+	__uint(max_entries, MAX_IN_FLIGHT_SEND);
+	__type(key, struct send_inflight_key);
+	__type(value, struct send_inflight_val);
+} send_inflight SEC(".maps");
 
 /* The single output channel. */
 struct {

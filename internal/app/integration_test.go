@@ -43,7 +43,10 @@ type capturedEvent struct {
 	Dport        uint16                       `json:"dport"`
 	Protocol     uint8                        `json:"protocol"`
 	DNS          bool                         `json:"dns"`
+	Hostname     string                       `json:"hostname"`
 	Duration     *uint64                      `json:"duration_ms"`
+	Bytes        *uint64                      `json:"bytes"`
+	LatencyUs    *uint64                      `json:"latency_us"`
 	ExitCode     int32                        `json:"exit_code"`
 	Reason       string                       `json:"reason"`
 	StillRunning []uint32                     `json:"still_running"`
@@ -189,7 +192,8 @@ var agentloupeMapNames = map[string]bool{
 	"candidates": true, "agent_cgroups": true, "file_infos": true,
 	"syscall_counts": true, "session_counter": true, "config_map": true,
 	"stats": true, "counters": true, "path_scratch_ma": true,
-	"pending_file_op": true, "events": true,
+	"pending_file_op": true, "rw_inflight": true, "snd_hostnames": true,
+	"send_inflight": true, "events": true,
 }
 
 func TestIntegrationLoaderObserveOnly(t *testing.T) {
@@ -245,13 +249,31 @@ func TestIntegrationLoaderObserveOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer listener.Close()
+	// Slice 5: echo back everything so the workload's recvs exercise
+	// the tcp_recvmsg fexit (request->response pairing). Reads then
+	// writes back each chunk; the workload reads exactly what it sent,
+	// so one 5-byte recv pairs with the one 5-byte send.
 	go func() {
 		for {
 			conn, err := listener.Accept()
 			if err != nil {
 				return
 			}
-			conn.Close()
+			go func(c net.Conn) {
+				defer c.Close()
+				buf := make([]byte, 2048)
+				for {
+					n, rerr := c.Read(buf)
+					if n > 0 {
+						if _, werr := c.Write(buf[:n]); werr != nil {
+							return
+						}
+					}
+					if rerr != nil {
+						return
+					}
+				}
+			}(conn)
 		}
 	}()
 	listenPort := uint16(listener.Addr().(*net.TCPAddr).Port)
@@ -267,6 +289,21 @@ func TestIntegrationLoaderObserveOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer udpConn.Close()
+	// Slice 5: echo UDP datagrams back so the workload's recv exercises
+	// the udp_recvmsg fexit. The DNS query sendto also lands here and is
+	// echoed to a socket that never reads — harmless, no recv event.
+	go func() {
+		buf := make([]byte, 2048)
+		for {
+			n, addr, err := udpConn.ReadFromUDP(buf)
+			if err != nil {
+				return
+			}
+			if _, err := udpConn.WriteToUDP(buf[:n], addr); err != nil {
+				return
+			}
+		}
+	}()
 	udpPort := uint16(udpConn.LocalAddr().(*net.UDPAddr).Port)
 
 	// Baseline kernel-object state, for the post-shutdown leak check.
@@ -285,7 +322,16 @@ func TestIntegrationLoaderObserveOnly(t *testing.T) {
 			Output:               outFile,
 			StatsInterval:        0,
 			EnableSyscallSummary: true,
-			SyscallInterval:      100 * time.Millisecond,
+			// Slice 2a: per-call read/write events are opt-in; the
+			// workload's 10-byte write to probe.txt must surface as a
+			// file_write with bytes=10. Byte accounting stays off to
+			// prove rw events work without it.
+			EnableFileRWEvents: true,
+			// Slice 3: per-call send events are opt-in; the
+			// workload's TCP/UDP sends below must surface as
+			// net_send events with this call's bytes.
+			EnableNetSendEvents: true,
+			SyscallInterval:     100 * time.Millisecond,
 		})
 		close(loaderDone)
 	}()
@@ -299,8 +345,15 @@ func TestIntegrationLoaderObserveOnly(t *testing.T) {
 	}()
 
 	// --- workload --------------------------------------------------------------
+	// Slice 4: the same run also emits one unconnected UDP sendto
+	// carrying a hand-built DNS query (exercises the sys_enter DNS
+	// parser on the sendto buf/len path) and one TCP send carrying a
+	// hand-built ClientHello with an SNI extension (exercises the SNI
+	// parser). Both names use .invalid so nothing ever resolves.
+	const dnsName = "agentloupe-probe.invalid"
+	const sniName = "agentloupe-tls.invalid"
 	script := fmt.Sprintf(`
-import socket, subprocess
+import socket, struct, subprocess, time
 marker = %q
 with open(%q, "w") as f:
     f.write("agentloupe")
@@ -309,12 +362,39 @@ p.wait()
 with open(%q, "w") as f:
     f.write(str(p.pid))
 s = socket.create_connection(("127.0.0.1", %d), timeout=5)
+s.send(b"hello")
+time.sleep(0.01)
+data = b""
+while len(data) < 5:
+    chunk = s.recv(5 - len(data))
+    if not chunk:
+        break
+    data += chunk
 s.close()
 u = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 u.connect(("127.0.0.1", %d))
 u.send(b"x")
+time.sleep(0.01)
+u.recv(1)
 u.close()
-`, token, targetFile, trueBin, pidFile, listenPort, udpPort)
+def qname(name):
+    return b"".join(bytes([len(p)]) + p for p in name.split(b".")) + b"\x00"
+dnsquery = struct.pack(">HHHHHH", 0x1234, 0x0100, 1, 0, 0, 0) + qname(%q.encode()) + struct.pack(">HH", 1, 1)
+u2 = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+u2.sendto(dnsquery, ("127.0.0.1", %d))
+u2.close()
+sni = %q.encode()
+entry = b"\x00" + struct.pack(">H", len(sni)) + sni
+extdata = struct.pack(">H", len(entry)) + entry
+ext = struct.pack(">HH", 0, len(extdata)) + extdata
+extensions = struct.pack(">H", len(ext)) + ext
+body = b"\x03\x03" + bytes(32) + b"\x00" + struct.pack(">H", 2) + b"\x00\x2f" + bytes([1, 0]) + extensions
+hs = b"\x01" + len(body).to_bytes(3, "big") + body
+hello = b"\x16\x03\x01" + len(hs).to_bytes(2, "big") + hs
+s2 = socket.create_connection(("127.0.0.1", %d), timeout=5)
+s2.send(hello)
+s2.close()
+`, token, targetFile, trueBin, pidFile, listenPort, udpPort, dnsName, udpPort, sniName, listenPort)
 
 	type workloadResult struct {
 		pyPID, truePID int
@@ -447,6 +527,14 @@ FOUND:
 	// UDP connect must be visible (protocol 17) alongside TCP.
 	var udpEv *capturedEvent
 	var closeEv *capturedEvent
+	var writeEv *capturedEvent
+	var readEv *capturedEvent
+	var tcpSendEv *capturedEvent
+	var udpSendEv *capturedEvent
+	var sniSendEv *capturedEvent
+	var dnsSendEv *capturedEvent
+	var tcpRecvEv *capturedEvent
+	var udpRecvEv *capturedEvent
 	for i := range events {
 		ev := &events[i]
 		if ev.Type == "net_connect" && ev.PID == uint32(lastWorkload.pyPID) && ev.Protocol == 17 {
@@ -454,6 +542,42 @@ FOUND:
 		}
 		if ev.Type == "file_close" && ev.PID == uint32(lastWorkload.pyPID) {
 			closeEv = ev
+		}
+		// Slice 2a: the workload's 10-byte write to probe.txt must
+		// surface as a discrete file_write with this call's bytes.
+		if ev.Type == "file_write" && ev.PID == uint32(lastWorkload.pyPID) && ev.Path == targetFile {
+			writeEv = ev
+		}
+		if ev.Type == "file_read" && ev.PID == uint32(lastWorkload.pyPID) {
+			readEv = ev
+		}
+		// Slice 3: the workload's 5-byte TCP send and 1-byte UDP
+		// send must surface as discrete net_send events with this
+		// call's bytes. Slice 4: the raw-payload sends carry no
+		// hostname, while the DNS query and ClientHello sends carry
+		// the parsed names — matched by hostname so each finds
+		// exactly its own event.
+		if ev.Type == "net_send" && ev.PID == uint32(lastWorkload.pyPID) && ev.Protocol == 6 && ev.Dport == listenPort && ev.Hostname == "" {
+			tcpSendEv = ev
+		}
+		if ev.Type == "net_send" && ev.PID == uint32(lastWorkload.pyPID) && ev.Protocol == 17 && ev.Dport == udpPort && ev.Hostname == "" {
+			udpSendEv = ev
+		}
+		if ev.Type == "net_send" && ev.PID == uint32(lastWorkload.pyPID) && ev.Protocol == 6 && ev.Dport == listenPort && ev.Hostname == sniName {
+			sniSendEv = ev
+		}
+		if ev.Type == "net_send" && ev.PID == uint32(lastWorkload.pyPID) && ev.Protocol == 17 && ev.Dport == udpPort && ev.Hostname == dnsName {
+			dnsSendEv = ev
+		}
+		// Slice 5: the echo replies must surface as discrete net_recv
+		// events pairing with the sends above (first match wins: the
+		// 10ms sleep guarantees the whole reply is buffered, so one
+		// recv consumes the whole pairing).
+		if ev.Type == "net_recv" && ev.PID == uint32(lastWorkload.pyPID) && ev.Protocol == 6 && ev.Dport == listenPort && tcpRecvEv == nil {
+			tcpRecvEv = ev
+		}
+		if ev.Type == "net_recv" && ev.PID == uint32(lastWorkload.pyPID) && ev.Protocol == 17 && ev.Dport == udpPort && udpRecvEv == nil {
+			udpRecvEv = ev
 		}
 	}
 	if udpEv == nil {
@@ -467,11 +591,113 @@ FOUND:
 	if closeEv != nil && closeEv.Duration == nil {
 		fail("file_close present but duration_ms missing: %s", closeEv.Raw)
 	}
+	if writeEv == nil {
+		fail("missing file_write for %s (pid %d) despite --enable-file-rw-events", targetFile, lastWorkload.pyPID)
+	}
+	if writeEv.Bytes == nil || *writeEv.Bytes != 10 {
+		fail("file_write bytes = %d, want 10 (one 10-byte write call): %s", *writeEv.Bytes, writeEv.Raw)
+	}
+	if writeEv.AgentName != agentName {
+		fail("file_write agent_name = %q, want %q", writeEv.AgentName, agentName)
+	}
+	if readEv == nil {
+		fail("missing file_read for workload interpreter (pid %d) despite --enable-file-rw-events", lastWorkload.pyPID)
+	}
+	if tcpSendEv == nil {
+		fail("missing TCP net_send to 127.0.0.1:%d (pid %d) despite --enable-net-send-events", listenPort, lastWorkload.pyPID)
+	}
+	if tcpSendEv.Bytes == nil || *tcpSendEv.Bytes != 5 {
+		fail("TCP net_send bytes = %d, want 5 (one 5-byte send call): %s", *tcpSendEv.Bytes, tcpSendEv.Raw)
+	}
+	if tcpSendEv.Daddr != "127.0.0.1" {
+		fail("TCP net_send daddr = %q, want 127.0.0.1: %s", tcpSendEv.Daddr, tcpSendEv.Raw)
+	}
+	if tcpSendEv.AgentName != agentName {
+		fail("TCP net_send agent_name = %q, want %q", tcpSendEv.AgentName, agentName)
+	}
+	if tcpSendEv.Hostname != "" {
+		fail("TCP net_send hostname = %q, want empty (raw payload holds no name): %s", tcpSendEv.Hostname, tcpSendEv.Raw)
+	}
+	if udpSendEv == nil {
+		fail("missing UDP net_send to 127.0.0.1:%d (pid %d) despite --enable-net-send-events", udpPort, lastWorkload.pyPID)
+	}
+	if udpSendEv.Bytes == nil || *udpSendEv.Bytes != 1 {
+		fail("UDP net_send bytes = %d, want 1 (one 1-byte send call): %s", *udpSendEv.Bytes, udpSendEv.Raw)
+	}
+	if udpSendEv.Hostname != "" {
+		fail("UDP net_send hostname = %q, want empty (raw payload holds no name): %s", udpSendEv.Hostname, udpSendEv.Raw)
+	}
+	// Slice 4: the DNS query sendto must surface the parsed qname, and
+	// the ClientHello send the parsed SNI, with this call's bytes.
+	// Expected sizes mirror the workload's packet construction above:
+	// DNS = 12B header + qname (len-prefixed labels + root) + qtype/qclass;
+	// ClientHello = record(5) + hs hdr(4) + version(2) + random(32) +
+	// session_id(1) + cipher_suites(2+2) + compression(1+1) +
+	// extensions_len(2) + ext(type 2 + len 2 + list_len 2 + entry 1+2+len).
+	wantDNSBytes := uint64(12 + 4)
+	for _, label := range strings.Split(dnsName, ".") {
+		wantDNSBytes += uint64(1 + len(label))
+	}
+	wantDNSBytes++ // root terminator
+	wantSNIBytes := uint64(5 + 4 + 2 + 32 + 1 + (2 + 2) + (1 + 1) + 2 + (2 + 2 + 2 + (1 + 2 + len(sniName))))
+	if dnsSendEv == nil {
+		fail("missing DNS net_send to 127.0.0.1:%d with hostname %q (pid %d) despite --enable-net-send-events", udpPort, dnsName, lastWorkload.pyPID)
+	}
+	if dnsSendEv.Bytes == nil || *dnsSendEv.Bytes != wantDNSBytes {
+		fail("DNS net_send bytes = %d, want %d (one query sendto): %s", *dnsSendEv.Bytes, wantDNSBytes, dnsSendEv.Raw)
+	}
+	if sniSendEv == nil {
+		fail("missing SNI net_send to 127.0.0.1:%d with hostname %q (pid %d) despite --enable-net-send-events", listenPort, sniName, lastWorkload.pyPID)
+	}
+	if sniSendEv.Bytes == nil || *sniSendEv.Bytes != wantSNIBytes {
+		fail("SNI net_send bytes = %d, want %d (one ClientHello send): %s", *sniSendEv.Bytes, wantSNIBytes, sniSendEv.Raw)
+	}
+	if sniSendEv.AgentName != agentName {
+		fail("SNI net_send agent_name = %q, want %q", sniSendEv.AgentName, agentName)
+	}
+	// Slice 5: the echo replies must pair with the sends above. The
+	// workload sleeps 10ms between each send and its recv, so the
+	// paired latency is ~10ms — the floor of 5ms leaves 2x margin for
+	// scheduling noise while still proving the pairing (an unpaired
+	// recv would report latency_us = 0).
+	if tcpRecvEv == nil {
+		fail("missing TCP net_recv to 127.0.0.1:%d (pid %d) despite --enable-net-send-events", listenPort, lastWorkload.pyPID)
+	}
+	if tcpRecvEv.Bytes == nil || *tcpRecvEv.Bytes != 5 {
+		fail("TCP net_recv bytes = %v, want 5 (one 5-byte echo read): %s", tcpRecvEv.Bytes, tcpRecvEv.Raw)
+	}
+	if tcpRecvEv.Daddr != "127.0.0.1" {
+		fail("TCP net_recv daddr = %q, want 127.0.0.1: %s", tcpRecvEv.Daddr, tcpRecvEv.Raw)
+	}
+	if tcpRecvEv.Hostname != "" {
+		fail("TCP net_recv hostname = %q, want empty (paired with the raw-payload send): %s", tcpRecvEv.Hostname, tcpRecvEv.Raw)
+	}
+	if tcpRecvEv.LatencyUs == nil || *tcpRecvEv.LatencyUs < 5000 {
+		fail("TCP net_recv latency_us = %v, want >= 5000 (10ms send->recv sleep): %s", tcpRecvEv.LatencyUs, tcpRecvEv.Raw)
+	}
+	if udpRecvEv == nil {
+		fail("missing UDP net_recv to 127.0.0.1:%d (pid %d) despite --enable-net-send-events", udpPort, lastWorkload.pyPID)
+	}
+	if udpRecvEv.Bytes == nil || *udpRecvEv.Bytes != 1 {
+		fail("UDP net_recv bytes = %v, want 1 (one 1-byte echo read): %s", udpRecvEv.Bytes, udpRecvEv.Raw)
+	}
+	if udpRecvEv.Daddr != "127.0.0.1" {
+		fail("UDP net_recv daddr = %q, want 127.0.0.1: %s", udpRecvEv.Daddr, udpRecvEv.Raw)
+	}
+	if udpRecvEv.Hostname != "" {
+		fail("UDP net_recv hostname = %q, want empty (paired with the raw-payload send): %s", udpRecvEv.Hostname, udpRecvEv.Raw)
+	}
+	if udpRecvEv.LatencyUs == nil || *udpRecvEv.LatencyUs < 5000 {
+		fail("UDP net_recv latency_us = %v, want >= 5000 (10ms send->recv sleep): %s", udpRecvEv.LatencyUs, udpRecvEv.Raw)
+	}
 
 	if pyExec.SessionID == 0 || fileOpen.SessionID != pyExec.SessionID ||
-		connect.SessionID != pyExec.SessionID || trueExec.SessionID == 0 {
-		fail("session IDs disagree: exec=%d file_open=%d connect=%d child_exec=%d",
-			pyExec.SessionID, fileOpen.SessionID, connect.SessionID, trueExec.SessionID)
+		connect.SessionID != pyExec.SessionID || trueExec.SessionID == 0 ||
+		writeEv.SessionID != pyExec.SessionID || tcpSendEv.SessionID != pyExec.SessionID ||
+		sniSendEv.SessionID != pyExec.SessionID || dnsSendEv.SessionID != pyExec.SessionID ||
+		tcpRecvEv.SessionID != pyExec.SessionID || udpRecvEv.SessionID != pyExec.SessionID {
+		fail("session IDs disagree: exec=%d file_open=%d connect=%d child_exec=%d file_write=%d net_send=%d sni_send=%d dns_send=%d tcp_recv=%d udp_recv=%d",
+			pyExec.SessionID, fileOpen.SessionID, connect.SessionID, trueExec.SessionID, writeEv.SessionID, tcpSendEv.SessionID, sniSendEv.SessionID, dnsSendEv.SessionID, tcpRecvEv.SessionID, udpRecvEv.SessionID)
 	}
 
 	// Our programs, for the post-shutdown link cross-reference.
@@ -492,7 +718,7 @@ FOUND:
 		fail("reading stats map: %v", err)
 	}
 	var totalDrops, totalEmitted uint64
-	for typ := uint32(1); typ <= 12; typ++ {
+	for typ := uint32(1); typ <= 16; typ++ {
 		vals := make([]statVal, possibleCPUs())
 		key := typ
 		if err := statsMap.Lookup(&key, &vals); err != nil {

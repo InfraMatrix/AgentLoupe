@@ -20,6 +20,7 @@ var typeNames = map[uint16]string{
 	1: "exec", 2: "fork", 3: "exit", 4: "file_open", 5: "file_unlink",
 	6: "file_rename", 7: "file_chmod", 8: "file_close", 9: "file_io",
 	10: "net_connect", 11: "session_start", 12: "session_end",
+	13: "file_read", 14: "file_write", 15: "net_send", 16: "net_recv",
 }
 
 var pathSrcNames = map[uint8]string{
@@ -83,8 +84,8 @@ func Decode(raw []byte) (*Decoded, error) {
 	}
 	size := int(binary.LittleEndian.Uint16(raw[2:4]))
 	version := binary.LittleEndian.Uint16(raw[4:6])
-	if version != 4 {
-		return nil, fmt.Errorf("abi version %d, want 4", version)
+	if version != 8 {
+		return nil, fmt.Errorf("abi version %d, want 8", version)
 	}
 	if size < 72 || size > len(raw) {
 		return nil, fmt.Errorf("bad record size %d (have %d)", size, len(raw))
@@ -178,6 +179,19 @@ func Decode(raw []byte) (*Decoded, error) {
 		if d.Type == 9 {
 			d.Fields["partial"] = true
 		}
+	case 13, 14: // file_read / file_write: one vfs call (ABI v5)
+		if !need(552) {
+			return nil, fmt.Errorf("file_rw payload short")
+		}
+		d.Fields["path"] = cstr(p[0:512])
+		d.Fields["file_ptr"] = fmt.Sprintf("%#x", binary.LittleEndian.Uint64(p[512:520]))
+		d.Fields["bytes"] = binary.LittleEndian.Uint64(p[520:528])
+		d.Fields["open_ts_ns"] = binary.LittleEndian.Uint64(p[528:536])
+		// duration_us (p[536:544]) is the fentry-paired per-call
+		// latency (slice 2b). Zero means unknown (entry missed,
+		// degraded, or never attached) or sub-microsecond.
+		d.Fields["duration_us"] = binary.LittleEndian.Uint64(p[536:544])
+		d.Fields["path_src"] = pathSrcNames[p[544]]
 	case 10: // net_connect
 		if !need(48) {
 			return nil, fmt.Errorf("net payload short")
@@ -191,6 +205,64 @@ func Decode(raw []byte) (*Decoded, error) {
 			d.Fields["dns"] = true
 		}
 		d.Fields["result"] = int32(binary.LittleEndian.Uint32(p[40:44]))
+		if family == 2 {
+			d.Fields["daddr"] = net.IP(p[0:4]).String()
+			d.Fields["saddr"] = net.IP(p[16:20]).String()
+		} else {
+			d.Fields["daddr"] = net.IP(p[0:16]).String()
+			d.Fields["saddr"] = net.IP(p[16:32]).String()
+		}
+	case 15: // net_send: one tcp/udp_sendmsg call (ABI v6, +hostname in v7)
+		if !need(112) {
+			return nil, fmt.Errorf("net payload short")
+		}
+		// First 40 bytes mirror ev_net_connect (addrs, ports, family,
+		// protocol, dns bit); bytes replaces connect's result tail.
+		family := binary.LittleEndian.Uint16(p[36:38])
+		d.Fields["family"] = family
+		d.Fields["dport"] = binary.LittleEndian.Uint16(p[32:34])
+		d.Fields["sport"] = binary.LittleEndian.Uint16(p[34:36])
+		d.Fields["protocol"] = p[38]
+		if p[39]&1 != 0 {
+			d.Fields["dns"] = true
+		}
+		d.Fields["bytes"] = binary.LittleEndian.Uint64(p[40:48])
+		// Slice 4: DNS qname (DGRAM) / TLS SNI (STREAM) parsed from
+		// this call's send buffer; empty when the buffer held no
+		// parseable name. Omitted from the JSONL when empty, like the
+		// dns bit, so pre-v7 tooling sees a clean absence.
+		if host := cstr(p[48:112]); host != "" {
+			d.Fields["hostname"] = host
+		}
+		if family == 2 {
+			d.Fields["daddr"] = net.IP(p[0:4]).String()
+			d.Fields["saddr"] = net.IP(p[16:20]).String()
+		} else {
+			d.Fields["daddr"] = net.IP(p[0:16]).String()
+			d.Fields["saddr"] = net.IP(p[16:32]).String()
+		}
+	case 16: // net_recv: one tcp/udp_recvmsg call (ABI v8)
+		if !need(120) {
+			return nil, fmt.Errorf("net payload short")
+		}
+		// First 48 bytes mirror net_send (addrs, ports, family,
+		// protocol, dns bit, this call's bytes); latency_us pairs this
+		// recv with the thread's most recent send on the same socket
+		// (0 = unknown or sub-microsecond), and hostname is that send's
+		// parsed name, so responses carry their request's identity.
+		family := binary.LittleEndian.Uint16(p[36:38])
+		d.Fields["family"] = family
+		d.Fields["dport"] = binary.LittleEndian.Uint16(p[32:34])
+		d.Fields["sport"] = binary.LittleEndian.Uint16(p[34:36])
+		d.Fields["protocol"] = p[38]
+		if p[39]&1 != 0 {
+			d.Fields["dns"] = true
+		}
+		d.Fields["bytes"] = binary.LittleEndian.Uint64(p[40:48])
+		d.Fields["latency_us"] = binary.LittleEndian.Uint64(p[48:56])
+		if host := cstr(p[56:120]); host != "" {
+			d.Fields["hostname"] = host
+		}
 		if family == 2 {
 			d.Fields["daddr"] = net.IP(p[0:4]).String()
 			d.Fields["saddr"] = net.IP(p[16:20]).String()
@@ -329,7 +401,7 @@ func (p *Processor) shouldDrop(d *Decoded) bool {
 	}
 	var paths []string
 	switch d.Type {
-	case 4, 5, 7, 8, 9:
+	case 4, 5, 7, 8, 9, 13, 14:
 		if s, ok := d.Fields["path"].(string); ok {
 			paths = append(paths, s)
 		}

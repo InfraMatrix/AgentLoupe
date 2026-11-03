@@ -85,6 +85,16 @@ Opt-in probes (off by default):
 --enable-syscall-summary   # per-(session, process, syscall) counts, dumped by name
                            # in the stats log (top 25 per session) and, with
                            # --syscall-interval, as syscall_summary JSONL events
+--enable-file-rw-events    # discrete file_read/file_write event per vfs call
+                           # (ABI v5: this call's size + timestamps only;
+                           # works without --enable-io-accounting)
+--enable-net-send-events   # discrete net_send event per tcp/udp_sendmsg call
+                           # and net_recv event per tcp/udp_recvmsg call
+                           # (ABI v7: this call's bytes + destination +
+                           # hostname — DNS qname / TLS SNI parsed from
+                           # the send buffer; empty when it holds no name;
+                           # ABI v8: recv carries latency_us, the send->recv
+                           # time-to-first-byte; 0 when unpaired)
 ```
 
 ### Try the demo (one command)
@@ -202,6 +212,91 @@ Example:
 {"ts":"2026-10-30T16:05:36.915939035Z","type":"syscall_summary","session_id":14067088359163953153,"parent_session_id":0,"agent_name":"claude-code","pid":0,"pid_in_ns":0,"ppid":0,"uid":0,"comm":"","interval_ms":1010,"counts":{"close":1,"epoll_pwait2":5,"fstat":1,"futex":175,"madvise":10,"openat":1,"read":2,"statx":5,"write":2},"per_process_counts":{"5124":{"close":1,"epoll_pwait2":5,"fstat":1,"futex":175,"madvise":10,"openat":1,"read":2,"statx":5,"write":2}}}
 ```
 
+#### `file_read` / `file_write` events
+
+With `--enable-file-rw-events`, the loader emits one discrete event per
+`vfs_read`/`vfs_write` (and `readv`/`writev`) call on a tracked file —
+the per-call attribution that `file_close` totals and
+`--enable-io-accounting` counters cannot give. `bytes` is **this call's**
+byte count (the call's return value), not a cumulative total; pairing
+calls into per-open totals is done on `(file_ptr, open_ts_ns)`, the same
+key `file_close` uses. These are the fexit probes, so they work in both
+LSM and tracepoint-fallback modes, and they do not require
+`--enable-io-accounting`.
+
+Latency comes from four companion fentry probes on the same
+`vfs_read`/`vfs_write`/`vfs_readv`/`vfs_writev` symbols: each entry
+stamps `bpf_ktime_get_ns()` into an LRU map keyed on (thread, file),
+and the fexit side consumes it into `duration_us`. The fentry probes
+attach under the same flag but degrade independently — if they fail to
+load, the events still flow with `duration_us` 0, and the loader logs
+`file_rw_latency=false`. A zero duration on an individual event likewise
+means unknown (entry missed or evicted) or sub-microsecond, never a
+dropped event.
+
+Volume warning: this fires on every read/write a tracked process makes,
+including interpreter startup (hundreds of small reads). Prefer it for
+bounded captures, or pair it with `--drop-path-prefix` for trees you do
+not care about. The events land in the timeline as per-path markers and
+in the scorecard as `file_reads`/`file_writes` call counts (byte totals
+still come from `file_close`, so nothing double-counts).
+
+| Field | Meaning |
+|---|---|
+| `type` | `"file_read"` or `"file_write"`. |
+| `path`, `path_src` | File path and how it was resolved (same semantics as `file_open`). |
+| `file_ptr`, `open_ts_ns` | Correlation key for one open (same as `file_close`). |
+| `bytes` | This call's byte count. |
+| `duration_us` | Per-call latency in microseconds, paired by the fentry probes. **0 means unknown** (entry missed, fentry degraded/unattached) **or sub-microsecond** — never a dropped event. |
+
+#### `net_send` events
+
+With `--enable-net-send-events`, the loader emits one discrete event per
+`tcp_sendmsg`/`udp_sendmsg` call on a tracked socket — the network-side
+equivalent of the file `file_read`/`file_write` events. `bytes` is
+**this call's** byte count (the call's return value; failed calls emit
+nothing), with the destination (`daddr`, `dport`) and source port from
+the socket. TCP destinations always come from the sock; unconnected UDP
+sends carry a per-call destination parsed from the message (connected
+UDP falls back to the sock). Same volume warning as the rw events: this
+fires on every send a tracked process makes. The events land in the
+timeline as per-destination markers (with byte counts and hostnames) and
+in the scorecard as `net_sends`/`net_sent_bytes` totals plus a sorted
+unique `hostnames` list (per-destination send volume and per-dest
+hostnames stay in the timeline's net entries). Each send also stamps a
+per-(thread, socket) last-send record consumed by the recv path below,
+so enabling sends is what arms recv latency.
+
+#### `net_recv` events (ABI v8)
+
+The same flag emits one event per `tcp_recvmsg`/`udp_recvmsg` call on a
+tracked socket (failed calls emit nothing). `bytes` is this call's byte
+count; the address fields are the **remote peer** — the sock's peer for
+TCP, the datagram's source address for UDP. `latency_us` is the
+microseconds from the last send on the same thread and socket to this
+recv: the call's time-to-first-byte. It is 0 when no send was seen
+(recv before any send, a cross-thread send/recv pair, an evicted
+record) — unknown, never wrong. The send's `hostname` rides along onto
+the recv, so responses inherit the name of the request that caused
+them. Recvs land in the timeline as per-destination markers (with byte
+counts, latencies, and hostnames) and in the scorecard as
+`net_recvs`/`net_recv_bytes` totals plus `first_response_us`, the
+session's first paired send→recv latency.
+
+`hostname` (ABI v7) is the DNS query name for UDP sends and the TLS
+ClientHello SNI for TCP sends, parsed from **this call's** send buffer at
+`sys_enter` (where the buffer pointers are stable) and paired with the
+send at its `fexit`. Parsing is strict: single-question queries with
+plain labels only, well-formed ClientHellos walked to `server_name`, the
+whole name fitting in 63 characters. Anything else — raw TCP/UDP
+payloads, over-long names, a missed enter probe — yields an **empty**
+hostname, never a dropped event. A name learned from an earlier send to
+the same destination (e.g. DNS-before-connect) also annotates that
+destination's `net_connect` markers in the timeline; SNI arrives after
+its connect, so it is never backfilled there. Two known gaps: `sendmmsg`
+batches share the first datagram's parse, and only `iov[0]` of a
+`sendmsg` is inspected.
+
 ### Session lifecycle: `root_exit` and orphans
 
 A session is a process tree, not just its root process. When the
@@ -244,7 +339,9 @@ Useful loader flags: `--drop-path-prefix /proc/` (repeatable) suppresses
 file-event noise (e.g. agents polling their own `/proc/<pid>/stat`);
 `session_end` events carry `cpu_user_ms`/`cpu_sys_ms` (session root
 process CPU, sampled from `/proc`). Network events cover TCP and UDP;
-connects to port 53 are flagged `"dns": true` (no payload parsing).
+connects to port 53 are flagged `"dns": true`, and with
+`--enable-net-send-events` the send's `hostname` carries the parsed DNS
+query name (UDP) or TLS SNI (TCP) — empty when the buffer holds no name.
 Paths/argv are captured up to 512 bytes (ABI v4); `comm` remains capped
 at 16 chars by the kernel (`TASK_COMM_LEN`) — use exec `filename`/`argv`
 to disambiguate. `--force-tracepoint-mode` forces the tracepoint
@@ -338,7 +435,7 @@ Not yet tested on a live kernel:
   from raw syscall arguments (relative paths stay relative) and the
   dentry walk may miss mount prefixes.
 - **Opt-in probe sets** (`--enable-io-accounting`,
-  `--enable-syscall-summary`). Not attached in the tested configuration
+  `--enable-syscall-summary`, `--enable-file-rw-events`). Not attached in the tested configuration
   unless noted. (Unlink/rename/chmod events are core since slice 1 and
   always attached.)
 - **Any other kernel version.** The 5.8 / 5.11 figures above are design
