@@ -65,7 +65,8 @@ make test             # unit tests: no kernel, no root
 make build            # make bpf + go build -o agentloupe ./cmd/agentloupe
 # Optional, only on the target kernel: make vmlinux.h
 
-# Default probe set: process, file-open, network. Nothing is pinned;
+# Default probe set: process, file-open, file-mutations, network.
+# Nothing is pinned;
 # SIGINT/SIGTERM or --max-runtime detaches everything.
 sudo ./agentloupe \
   --config configs/agents.example.yaml \
@@ -80,7 +81,6 @@ events go to stdout (or `--output file`).
 Opt-in probes (off by default):
 
 ```sh
---enable-file-mutations    # unlink / rename / chmod events
 --enable-io-accounting     # vfs_* byte counts + file_close (make bench-io first)
 --enable-syscall-summary   # per-(session, process, syscall) counts, dumped by name
                            # in the stats log (top 25 per session) and, with
@@ -337,10 +337,10 @@ Not yet tested on a live kernel:
   exercised. Expect lower path fidelity in this mode: file paths come
   from raw syscall arguments (relative paths stay relative) and the
   dentry walk may miss mount prefixes.
-- **Opt-in probe sets** (`--enable-file-mutations`,
-  `--enable-io-accounting`). Not attached in the tested configuration.
-  (`--enable-syscall-summary` is enabled by the integration test and
-  the adoption smoke above.)
+- **Opt-in probe sets** (`--enable-io-accounting`,
+  `--enable-syscall-summary`). Not attached in the tested configuration
+  unless noted. (Unlink/rename/chmod events are core since slice 1 and
+  always attached.)
 - **Any other kernel version.** The 5.8 / 5.11 figures above are design
   floors, not tested versions.
 

@@ -861,8 +861,9 @@ int handle_file_sys_enter(struct sys_raw_args *ctx)
 	default:
 		return 0;
 	}
-	if (nr != NR_openat && nr != NR_openat2 && !cfg_enabled(3))
-		return 0; /* file mutations are opt-in */
+	/* File mutations (unlink/rename/chmod) are core, not opt-in: the
+	 * switch above is the only gate. (cfg slot 3 is retained for ABI
+	 * stability but no longer consulted.) */
 	si = BPF_CORE_READ(regs, si);
 	dx = BPF_CORE_READ(regs, dx);
 	path = (const char *)(unsigned long)si;
