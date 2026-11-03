@@ -112,4 +112,28 @@ func TestBuildRequestsModes(t *testing.T) {
 	if names(buildRequests(true, Options{}))["handle_vfs_read_entry"] {
 		t.Errorf("default set must not attach fentry latency probes: per-call I/O is opt-in")
 	}
+	// Slice 3: the sendmsg fexit probes ride their own flag with their
+	// own tag, so a bad sendmsg prototype degrades to no send events
+	// instead of losing connects.
+	sendOnly := names(buildRequests(true, Options{EnableNetSendEvents: true}))
+	for _, p := range []string{"handle_tcp_sendmsg", "handle_udp_sendmsg"} {
+		if !sendOnly[p] {
+			t.Errorf("send-only set missing send probe %s: %v", p, sendOnly)
+		}
+	}
+	sendTags := func(reqs []progReq) map[string]string {
+		out := map[string]string{}
+		for _, r := range reqs {
+			out[r.Name] = r.Tag
+		}
+		return out
+	}(buildRequests(true, Options{EnableNetSendEvents: true}))
+	for _, p := range []string{"handle_tcp_sendmsg", "handle_udp_sendmsg"} {
+		if sendTags[p] != "netsend" {
+			t.Errorf("send probe %s has tag %q, want %q", p, sendTags[p], "netsend")
+		}
+	}
+	if names(buildRequests(true, Options{}))["handle_tcp_sendmsg"] {
+		t.Errorf("default set must not attach send probes: per-call sends are opt-in")
+	}
 }

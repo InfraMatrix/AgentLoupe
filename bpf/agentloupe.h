@@ -56,7 +56,7 @@
 #ifndef AGENTLOUPE_H
 #define AGENTLOUPE_H
 
-#define AGENTLOUPE_ABI_VERSION 5
+#define AGENTLOUPE_ABI_VERSION 6
 
 /* Minimum kernel for full (LSM) mode; the loader enforces this, the
  * header only documents it. Fallback floor is 5.8. */
@@ -108,7 +108,8 @@ enum event_type {
 	EVENT_SESSION_END   = 12, /* userspace-synthesised on leader exit       */
 	EVENT_FILE_READ     = 13, /* fexit vfs_read/readv, opt-in (ABI v5)      */
 	EVENT_FILE_WRITE    = 14, /* fexit vfs_write/writev, opt-in (ABI v5)    */
-	EVENT_MAX           = 15,
+	EVENT_NET_SEND      = 15, /* fexit tcp/udp_sendmsg, opt-in (ABI v6)     */
+	EVENT_MAX           = 16,
 };
 
 /* How a path string in a payload was obtained. Recorded per path (rename
@@ -331,8 +332,8 @@ struct agentloupe_config {
 	__u32 enable_file_rw_events;      /* gates per-call read/write events
 	                                     * (ABI v5, slice 2a; size+timestamps
 	                                     * only, no per-call latency yet)  */
-	__u32 _pad;                       /* explicit tail pad: sizeof must stay
-	                                     * a multiple of 8 (32 bytes total) */
+	__u32 enable_net_send_events;      /* gates per-call send events (ABI v6,
+	                                     * slice 3; size only, no latency)  */
 };                                        /* 32 bytes                          */
 
 /* ---- Event records -------------------------------------------------------
@@ -481,6 +482,28 @@ struct ev_file_rw {
 	__u8  _pad[7];
 };                                        /* 552 bytes                         */
 
+/*
+ * One send(2)/sendto(2)/sendmsg(2)-class call on a tracked socket
+ * (ABI v6, opt-in via enable_net_send_events). bytes is THIS call's
+ * return value (ret > 0; short/failed calls are skipped at the fexit,
+ * like account_io's ret <= 0 skip), not a cumulative total. The first
+ * 40 bytes are laid out exactly like ev_net_connect (addrs, ports,
+ * family, protocol, flags) so the decoder shares its parsing; bytes
+ * replaces connect's result/_pad2 tail (sends have no errno to report —
+ * only successful calls emit). No per-call latency: slice 3 is the
+ * network-side equivalent of slice 2a (attribution first).
+ */
+struct ev_net_send {
+	__u8  daddr[16];                  /* IPv4 in first 4 bytes if family=2 */
+	__u8  saddr[16];
+	__u16 dport;                      /* host byte order                   */
+	__u16 sport;                      /* 0 if not yet bound/unknown        */
+	__u16 family;                     /* AF_INET / AF_INET6                */
+	__u8  protocol;                   /* IPPROTO_TCP / UDP                 */
+	__u8  flags;                      /* bit0: DNS (dport 53)              */
+	__u64 bytes;                      /* this call's byte count (ret)      */
+};                                        /* 48 bytes                          */
+
 struct ev_net_connect {
 	__u8  daddr[16];                  /* IPv4 in first 4 bytes if family=2 */
 	__u8  saddr[16];
@@ -506,6 +529,7 @@ struct ev_net_connect {
 #define EVLEN_FILE_READ (sizeof(struct event_hdr) + sizeof(struct ev_file_rw))
 #define EVLEN_FILE_WRITE (sizeof(struct event_hdr) + sizeof(struct ev_file_rw))
 #define EVLEN_NET_CONNECT (sizeof(struct event_hdr) + sizeof(struct ev_net_connect))
+#define EVLEN_NET_SEND (sizeof(struct event_hdr) + sizeof(struct ev_net_send))
 
 /* Compile-time ABI guards: if any of these fire, bump AGENTLOUPE_ABI_VERSION
  * and update the Go decoder in the same commit. `make check-header` verifies
@@ -517,6 +541,7 @@ _Static_assert(sizeof(struct ev_file_open) == 536, "ev_file_open ABI changed");
 _Static_assert(sizeof(struct ev_file_chmod) == 528, "ev_file_chmod ABI changed");
 _Static_assert(sizeof(struct ev_file_close) == 552, "ev_file_close ABI changed");
 _Static_assert(sizeof(struct ev_file_rw) == 552, "ev_file_rw ABI changed");
+_Static_assert(sizeof(struct ev_net_send) == 48, "ev_net_send ABI changed");
 _Static_assert(sizeof(struct agentloupe_config) == 32, "agentloupe_config ABI changed");
 _Static_assert(sizeof(struct session_info) == 88, "session_info ABI changed");
 _Static_assert(sizeof(struct tracked_session) == 8, "tracked_session ABI changed");

@@ -59,6 +59,8 @@ type scorecard struct {
 	WriteBytes uint64  `json:"write_bytes"`
 	Connects   int     `json:"net_connects"`
 	DNS        int     `json:"dns_connects"`
+	Sends      int     `json:"net_sends"`
+	SentBytes  uint64  `json:"net_sent_bytes"`
 	CPUUserMS  uint64  `json:"cpu_user_ms,omitempty"`
 	CPUSysMS   uint64  `json:"cpu_sys_ms,omitempty"`
 	RootExit   string  `json:"root_exit,omitempty"`
@@ -164,6 +166,11 @@ func summarize(events []event) []*scorecard {
 				s.DNS++
 			}
 			s.net[fmt.Sprintf("%s:%d", ev.Daddr, ev.Dport)]++
+		case "net_send":
+			// Count calls and bytes; per-dest send volume stays in
+			// the timeline's net entries, not here.
+			s.Sends++
+			s.SentBytes += ev.Bytes
 		case "root_exit":
 			if s.rootExitT.IsZero() {
 				s.rootExitT = ts
@@ -237,8 +244,8 @@ func main() {
 		fmt.Printf("%-22s %-10d %7.1fs %6d %6d %7d %7d %9d %9d %5d %d+%d\n",
 			trunc(s.Agent, 22), s.SessionID%10000000000, s.DurationS, s.Execs, s.Forks,
 			s.Opens, s.UniqPaths, s.ReadBytes, s.WriteBytes, s.Connects, s.CPUUserMS, s.CPUSysMS)
-		fmt.Printf("    comms=%v dirs=%v net=%v dns=%d mutations=%d reads=%d writes=%d\n",
-			s.TopComms, s.TopDirs, s.Net, s.DNS, s.Mutations, s.Reads, s.Writes)
+		fmt.Printf("    comms=%v dirs=%v net=%v dns=%d sends=%d sent_bytes=%d mutations=%d reads=%d writes=%d\n",
+			s.TopComms, s.TopDirs, s.Net, s.DNS, s.Sends, s.SentBytes, s.Mutations, s.Reads, s.Writes)
 		if s.RootExit != "" {
 			fmt.Printf("    root_exit=%s orphan_gap=%.1fs end_reason=%s still_running=%v\n",
 				s.RootExit, s.OrphanGapS, s.SessionEndReason, s.StillRunning)

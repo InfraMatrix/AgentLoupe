@@ -158,9 +158,11 @@ type PathStat struct {
 }
 
 type NetStat struct {
-	Dest  string `json:"dest"`
-	Count int    `json:"count"`
-	DNS   int    `json:"dns_count"`
+	Dest      string `json:"dest"`
+	Count     int    `json:"count"`
+	DNS       int    `json:"dns_count"`
+	Sends     int    `json:"sends,omitempty"`
+	SentBytes uint64 `json:"sent_bytes,omitempty"`
 }
 
 type SeriesBucket struct {
@@ -488,6 +490,29 @@ func (b *builder) add(ev *rawEvent) {
 				detail += " (DNS)"
 			}
 			s.addMarker(&Marker{Ts: ev.Ts, Type: "net_connect", PID: ev.PID, Detail: detail})
+		}
+	case "net_send":
+		dest := fmt.Sprintf("%s:%d", ev.Daddr, ev.Dport)
+		ns, ok := s.net[dest]
+		if !ok {
+			ns = &NetStat{Dest: dest}
+			s.net[dest] = ns
+		}
+		// Sends share the per-dest entry with connects (Count stays
+		// connects-only) so per-destination send volume is visible
+		// without changing what Count means.
+		ns.Sends++
+		ns.SentBytes += ev.Bytes
+		if hasTS {
+			detail := dest
+			if pn := protoName(ev.Protocol); pn != "" {
+				detail = pn + " " + detail
+			}
+			detail += fmt.Sprintf(" (%d bytes)", ev.Bytes)
+			if ev.DNS {
+				detail += " (DNS)"
+			}
+			s.addMarker(&Marker{Ts: ev.Ts, Type: "net_send", PID: ev.PID, Detail: detail})
 		}
 	case "syscall_summary":
 		b.hasSummary = true

@@ -19,7 +19,7 @@ import (
 //   event_hdr 72 B, then one fixed-size payload per type.
 //   ev_exec 1560, ev_fork 8, ev_exit 32, ev_file_open 536, ev_file_unlink 520,
 //   ev_file_rename 1032, ev_file_chmod 528, ev_file_close 552,
-//   ev_file_rw 552, ev_net_connect 48.
+//   ev_file_rw 552, ev_net_connect 48, ev_net_send 48.
 
 func putStr(dst []byte, s string) { copy(dst, s) }
 
@@ -28,7 +28,7 @@ func buildRecord(typ uint16, flags uint16, payload []byte) []byte {
 	raw := make([]byte, 72+len(payload))
 	binary.LittleEndian.PutUint16(raw[0:2], typ)
 	binary.LittleEndian.PutUint16(raw[2:4], uint16(len(raw))) // hdr.size
-	binary.LittleEndian.PutUint16(raw[4:6], 5)                // ABI version
+	binary.LittleEndian.PutUint16(raw[4:6], 6)                // ABI version
 	binary.LittleEndian.PutUint16(raw[6:8], flags)
 	binary.LittleEndian.PutUint64(raw[8:16], 123456789) // ts_ns
 	binary.LittleEndian.PutUint64(raw[16:24], 42)       // session_id
@@ -353,6 +353,50 @@ func TestDecodeValidEvents(t *testing.T) {
 			},
 		},
 		{
+			name: "net_send carries this call's bytes and destination",
+			raw: func() []byte {
+				p := make([]byte, 48)
+				copy(p[0:4], net.ParseIP("93.184.216.34").To4())
+				copy(p[16:20], net.ParseIP("192.168.1.10").To4())
+				binary.LittleEndian.PutUint16(p[32:34], 443)
+				binary.LittleEndian.PutUint16(p[34:36], 54321)
+				binary.LittleEndian.PutUint16(p[36:38], 2)
+				p[38] = 6 // IPPROTO_TCP
+				binary.LittleEndian.PutUint64(p[40:48], 5) // bytes, not cumulative
+				return buildRecord(15, 0, p)
+			}(),
+			check: func(t *testing.T, d *Decoded) {
+				assertField(t, d, "daddr", "93.184.216.34")
+				assertField(t, d, "saddr", "192.168.1.10")
+				assertField(t, d, "dport", uint16(443))
+				assertField(t, d, "sport", uint16(54321))
+				assertField(t, d, "family", uint16(2))
+				assertField(t, d, "protocol", uint8(6))
+				assertField(t, d, "bytes", uint64(5))
+				assertNoField(t, d, "dns")
+			},
+		},
+		{
+			name: "net_send flags DNS on port 53",
+			raw: func() []byte {
+				p := make([]byte, 48)
+				copy(p[0:4], net.ParseIP("8.8.8.8").To4())
+				binary.LittleEndian.PutUint16(p[32:34], 53)
+				binary.LittleEndian.PutUint16(p[36:38], 2)
+				p[38] = 17 // IPPROTO_UDP
+				p[39] = 1  // DNS bit
+				binary.LittleEndian.PutUint64(p[40:48], 32)
+				return buildRecord(15, 0, p)
+			}(),
+			check: func(t *testing.T, d *Decoded) {
+				assertField(t, d, "daddr", "8.8.8.8")
+				assertField(t, d, "dport", uint16(53))
+				assertField(t, d, "protocol", uint8(17))
+				assertField(t, d, "bytes", uint64(32))
+				assertField(t, d, "dns", true)
+			},
+		},
+		{
 			name: "session types have no kernel payload",
 			raw:  buildRecord(11, 0, nil),
 			check: func(t *testing.T, d *Decoded) {
@@ -490,7 +534,8 @@ func TestDecodeMalformed(t *testing.T) {
 		{"bad abi version 2", withVersion(buildRecord(2, 0, make([]byte, 8)), 2), "abi version 2"},
 		{"bad abi version 3", withVersion(buildRecord(2, 0, make([]byte, 8)), 3), "abi version 3"},
 		{"bad abi version 4", withVersion(buildRecord(2, 0, make([]byte, 8)), 4), "abi version 4"},
-		{"bad abi version 6", withVersion(buildRecord(2, 0, make([]byte, 8)), 6), "abi version 6"},
+		{"bad abi version 5", withVersion(buildRecord(2, 0, make([]byte, 8)), 5), "abi version 5"},
+		{"bad abi version 7", withVersion(buildRecord(2, 0, make([]byte, 8)), 7), "abi version 7"},
 		{"size below header", withSize(buildRecord(2, 0, make([]byte, 8)), 71), "bad record size 71"},
 		{"size zero", withSize(buildRecord(2, 0, make([]byte, 8)), 0), "bad record size 0"},
 		{"size beyond buffer", withSize(buildRecord(2, 0, make([]byte, 8)), 999), "bad record size 999"},
@@ -506,6 +551,7 @@ func TestDecodeMalformed(t *testing.T) {
 		{"file_io payload short", shortPayload(9, 551), "file_close payload short"},
 		{"file_read payload short", shortPayload(13, 551), "file_rw payload short"},
 		{"file_write payload short", shortPayload(14, 551), "file_rw payload short"},
+		{"net_send payload short", shortPayload(15, 47), "net payload short"},
 		{"net payload short", shortPayload(10, 47), "net payload short"},
 		{"full record truncated mid-payload", full[:len(full)-1], "bad record size"},
 	}
@@ -598,9 +644,9 @@ func TestProcessorJSONPipeline(t *testing.T) {
 }
 
 func TestTypeNamesCoverKernelEvents(t *testing.T) {
-	// Every kernel event_type 1..10 and 13..14 plus the two
+	// Every kernel event_type 1..15 plus the two
 	// userspace-synthesised session types must have a JSONL name.
-	for typ := uint16(1); typ <= 14; typ++ {
+	for typ := uint16(1); typ <= 15; typ++ {
 		if typeNames[typ] == "" {
 			t.Errorf("typeNames[%d] missing", typ)
 		}
@@ -610,5 +656,8 @@ func TestTypeNamesCoverKernelEvents(t *testing.T) {
 	}
 	if fmt.Sprint(typeNames[13]) != "file_read" || fmt.Sprint(typeNames[14]) != "file_write" {
 		t.Errorf("typeNames[13..14] = %q %q", typeNames[13], typeNames[14])
+	}
+	if fmt.Sprint(typeNames[15]) != "net_send" {
+		t.Errorf("typeNames[15] = %q", typeNames[15])
 	}
 }

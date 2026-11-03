@@ -138,6 +138,20 @@ type evNetConnectMirror struct {
 	Pad2     int32
 }
 
+// ev_net_send (ABI v6, slice 3): first 40 bytes mirror ev_net_connect
+// (addrs, ports, family, protocol, flags); bytes replaces the
+// result/_pad2 tail.
+type evNetSendMirror struct {
+	Daddr    [16]byte
+	Saddr    [16]byte
+	Dport    uint16
+	Sport    uint16
+	Family   uint16
+	Protocol uint8
+	Flags    uint8
+	Bytes    uint64
+}
+
 type sessionInfoMirror struct {
 	State     uint32
 	AgentID   uint32
@@ -185,7 +199,8 @@ type agentRefMirror struct {
 	AgentName [32]byte
 }
 
-// agentloupe_config (ABI v5: 32 bytes — 28 used + explicit tail pad).
+// agentloupe_config (ABI v6: 32 bytes, fully used — slot 6 took the
+// tail pad for enable_net_send_events).
 // Pinned here because the loader writes it as raw bytes in
 // maps.go setConfig/setNetUDPOnly: a silent sizeof change on the C side
 // (e.g. struct tail padding after adding a field) breaks every loader
@@ -197,7 +212,7 @@ type agentloupeConfigMirror struct {
 	EnableFileMutations    uint32
 	NetUDPOnly             uint32
 	EnableFileRWEvents     uint32
-	Pad                    uint32
+	EnableNetSendEvents    uint32
 }
 
 func goStructSizes() map[string]uintptr {
@@ -213,6 +228,7 @@ func goStructSizes() map[string]uintptr {
 		"ev_file_close":   unsafe.Sizeof(evFileCloseMirror{}),
 		"ev_file_rw":      unsafe.Sizeof(evFileRWMirror{}),
 		"ev_net_connect":  unsafe.Sizeof(evNetConnectMirror{}),
+		"ev_net_send":     unsafe.Sizeof(evNetSendMirror{}),
 		"session_info":    unsafe.Sizeof(sessionInfoMirror{}),
 		"tracked_session": unsafe.Sizeof(trackedSessionMirror{}),
 		"fd_info":         unsafe.Sizeof(fdInfoMirror{}),
@@ -273,7 +289,7 @@ func TestStructSizesMatchCHeader(t *testing.T) {
 	for _, name := range []string{
 		"event_hdr", "ev_exec", "ev_fork", "ev_exit", "ev_file_open",
 		"ev_file_unlink", "ev_file_rename", "ev_file_chmod", "ev_file_close",
-		"ev_file_rw", "ev_net_connect", "session_info", "tracked_session",
+		"ev_file_rw", "ev_net_connect", "ev_net_send", "session_info", "tracked_session",
 		"fd_info", "syscall_key", "agentloupe_config",
 	} {
 		if _, ok := cSizes[name]; !ok {
@@ -345,6 +361,12 @@ func TestStructOffsetsMatchDecoder(t *testing.T) {
 		{"ev_net_connect.family (p[36:38])", unsafe.Offsetof(evNetConnectMirror{}.Family), 36},
 		{"ev_net_connect.protocol (p[38])", unsafe.Offsetof(evNetConnectMirror{}.Protocol), 38},
 		{"ev_net_connect.result (p[40:44])", unsafe.Offsetof(evNetConnectMirror{}.Result), 40},
+		{"ev_net_send.dport (p[32:34])", unsafe.Offsetof(evNetSendMirror{}.Dport), 32},
+		{"ev_net_send.sport (p[34:36])", unsafe.Offsetof(evNetSendMirror{}.Sport), 34},
+		{"ev_net_send.family (p[36:38])", unsafe.Offsetof(evNetSendMirror{}.Family), 36},
+		{"ev_net_send.protocol (p[38])", unsafe.Offsetof(evNetSendMirror{}.Protocol), 38},
+		{"ev_net_send.flags (p[39])", unsafe.Offsetof(evNetSendMirror{}.Flags), 39},
+		{"ev_net_send.bytes (p[40:48])", unsafe.Offsetof(evNetSendMirror{}.Bytes), 40},
 		{"session_info.agent_name (raw[40:72])", unsafe.Offsetof(sessionInfoMirror{}.AgentName), 40},
 		{"session_info.root_comm (raw[72:88])", unsafe.Offsetof(sessionInfoMirror{}.RootComm), 72},
 		{"fd_info.session_id (raw[512:520])", unsafe.Offsetof(fdInfoMirror{}.SessionID), 512},
@@ -360,6 +382,7 @@ func TestStructOffsetsMatchDecoder(t *testing.T) {
 		{"agentloupe_config.enable_file_mutations (cfg[16:20])", unsafe.Offsetof(agentloupeConfigMirror{}.EnableFileMutations), 16},
 		{"agentloupe_config.net_udp_only (cfg[20:24])", unsafe.Offsetof(agentloupeConfigMirror{}.NetUDPOnly), 20},
 		{"agentloupe_config.enable_file_rw_events (cfg[24:28])", unsafe.Offsetof(agentloupeConfigMirror{}.EnableFileRWEvents), 24},
+		{"agentloupe_config.enable_net_send_events (cfg[28:32])", unsafe.Offsetof(agentloupeConfigMirror{}.EnableNetSendEvents), 28},
 	}
 	for _, tt := range tests {
 		if tt.got != tt.want {
@@ -380,7 +403,7 @@ func TestRecordSizesMatchEVLEN(t *testing.T) {
 		{1, "ev_exec"}, {2, "ev_fork"}, {3, "ev_exit"}, {4, "ev_file_open"},
 		{5, "ev_file_unlink"}, {6, "ev_file_rename"}, {7, "ev_file_chmod"},
 		{8, "ev_file_close"}, {9, "ev_file_close"}, {10, "ev_net_connect"},
-		{13, "ev_file_rw"}, {14, "ev_file_rw"},
+		{13, "ev_file_rw"}, {14, "ev_file_rw"}, {15, "ev_net_send"},
 	}
 	for _, tt := range tests {
 		raw := buildRecord(tt.typ, 0, make([]byte, sizes[tt.payload]))
@@ -402,9 +425,9 @@ func TestABIVersionMatchesHeader(t *testing.T) {
 	if m == nil {
 		t.Fatal("AGENTLOUPE_ABI_VERSION not found in bpf/agentloupe.h")
 	}
-	// Decode rejects anything but version 5 (see TestDecodeMalformed);
+	// Decode rejects anything but version 6 (see TestDecodeMalformed);
 	// if the header bumps the version, the decoder must move with it.
-	if string(m[1]) != "5" {
-		t.Errorf("AGENTLOUPE_ABI_VERSION = %s, but the Go decoder only accepts 5", m[1])
+	if string(m[1]) != "6" {
+		t.Errorf("AGENTLOUPE_ABI_VERSION = %s, but the Go decoder only accepts 6", m[1])
 	}
 }

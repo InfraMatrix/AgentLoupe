@@ -20,7 +20,7 @@ var typeNames = map[uint16]string{
 	1: "exec", 2: "fork", 3: "exit", 4: "file_open", 5: "file_unlink",
 	6: "file_rename", 7: "file_chmod", 8: "file_close", 9: "file_io",
 	10: "net_connect", 11: "session_start", 12: "session_end",
-	13: "file_read", 14: "file_write",
+	13: "file_read", 14: "file_write", 15: "net_send",
 }
 
 var pathSrcNames = map[uint8]string{
@@ -84,8 +84,8 @@ func Decode(raw []byte) (*Decoded, error) {
 	}
 	size := int(binary.LittleEndian.Uint16(raw[2:4]))
 	version := binary.LittleEndian.Uint16(raw[4:6])
-	if version != 5 {
-		return nil, fmt.Errorf("abi version %d, want 5", version)
+	if version != 6 {
+		return nil, fmt.Errorf("abi version %d, want 6", version)
 	}
 	if size < 72 || size > len(raw) {
 		return nil, fmt.Errorf("bad record size %d (have %d)", size, len(raw))
@@ -205,6 +205,28 @@ func Decode(raw []byte) (*Decoded, error) {
 			d.Fields["dns"] = true
 		}
 		d.Fields["result"] = int32(binary.LittleEndian.Uint32(p[40:44]))
+		if family == 2 {
+			d.Fields["daddr"] = net.IP(p[0:4]).String()
+			d.Fields["saddr"] = net.IP(p[16:20]).String()
+		} else {
+			d.Fields["daddr"] = net.IP(p[0:16]).String()
+			d.Fields["saddr"] = net.IP(p[16:32]).String()
+		}
+	case 15: // net_send: one tcp/udp_sendmsg call (ABI v6)
+		if !need(48) {
+			return nil, fmt.Errorf("net payload short")
+		}
+		// First 40 bytes mirror ev_net_connect (addrs, ports, family,
+		// protocol, dns bit); bytes replaces connect's result tail.
+		family := binary.LittleEndian.Uint16(p[36:38])
+		d.Fields["family"] = family
+		d.Fields["dport"] = binary.LittleEndian.Uint16(p[32:34])
+		d.Fields["sport"] = binary.LittleEndian.Uint16(p[34:36])
+		d.Fields["protocol"] = p[38]
+		if p[39]&1 != 0 {
+			d.Fields["dns"] = true
+		}
+		d.Fields["bytes"] = binary.LittleEndian.Uint64(p[40:48])
 		if family == 2 {
 			d.Fields["daddr"] = net.IP(p[0:4]).String()
 			d.Fields["saddr"] = net.IP(p[16:20]).String()

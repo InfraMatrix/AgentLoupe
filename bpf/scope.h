@@ -87,6 +87,8 @@ static __always_inline bool cfg_enabled(__u32 which)
 		return cfg->net_udp_only != 0;
 	if (which == 5)
 		return cfg->enable_file_rw_events != 0;
+	if (which == 6)
+		return cfg->enable_net_send_events != 0;
 	return false;
 }
 

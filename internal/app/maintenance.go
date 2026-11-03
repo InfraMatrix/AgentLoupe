@@ -130,7 +130,7 @@ func printStats(l *Loader, logf func(string, ...any)) {
 	for t, n := range typeNames {
 		names[uint32(t)] = n
 	}
-	for typ := uint32(1); typ < 15; typ++ {
+	for typ := uint32(1); typ < 16; typ++ {
 		vals := make([]statVal, possibleCPUs())
 		key := typ
 		if err := stats.Lookup(&key, &vals); err != nil {

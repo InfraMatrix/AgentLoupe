@@ -226,7 +226,7 @@ func newLoader(coll *ebpf.Collection) (*Loader, error) {
 	return l, nil
 }
 
-func (l *Loader) setConfig(ioAccounting, syscallSummary, fileMutations, fileRWEvents bool) error {
+func (l *Loader) setConfig(ioAccounting, syscallSummary, fileMutations, fileRWEvents, netSendEvents bool) error {
 	m := l.coll.Maps["config_map"]
 	if m == nil {
 		return fmt.Errorf("config_map missing from object")
@@ -236,13 +236,14 @@ func (l *Loader) setConfig(ioAccounting, syscallSummary, fileMutations, fileRWEv
 	binary.LittleEndian.PutUint64(val[0:8], l.runID)
 	// struct agentloupe_config: run_id, enable_syscall_summary,
 	// enable_file_io_accounting, enable_file_mutations, net_udp_only,
-	// enable_file_rw_events (header order). 32 bytes: 28 used + the
-	// explicit 4-byte tail pad (see _pad in the header).
+	// enable_file_rw_events, enable_net_send_events (header order).
+	// 32 bytes, fully used since ABI v6 (slot 6 took the tail pad).
 	binary.LittleEndian.PutUint32(val[8:12], boolToU32(syscallSummary))
 	binary.LittleEndian.PutUint32(val[12:16], boolToU32(ioAccounting))
 	binary.LittleEndian.PutUint32(val[16:20], boolToU32(fileMutations))
 	binary.LittleEndian.PutUint32(val[20:24], 0) // net_udp_only: set post-attach
 	binary.LittleEndian.PutUint32(val[24:28], boolToU32(fileRWEvents))
+	binary.LittleEndian.PutUint32(val[28:32], boolToU32(netSendEvents))
 	return m.Update(&key0, &val, ebpf.UpdateAny)
 }
 

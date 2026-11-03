@@ -190,7 +190,7 @@ var agentloupeMapNames = map[string]bool{
 	"candidates": true, "agent_cgroups": true, "file_infos": true,
 	"syscall_counts": true, "session_counter": true, "config_map": true,
 	"stats": true, "counters": true, "path_scratch_ma": true,
-	"pending_file_op": true, "events": true,
+	"pending_file_op": true, "rw_inflight": true, "events": true,
 }
 
 func TestIntegrationLoaderObserveOnly(t *testing.T) {
@@ -291,6 +291,10 @@ func TestIntegrationLoaderObserveOnly(t *testing.T) {
 			// file_write with bytes=10. Byte accounting stays off to
 			// prove rw events work without it.
 			EnableFileRWEvents: true,
+			// Slice 3: per-call send events are opt-in; the
+			// workload's TCP/UDP sends below must surface as
+			// net_send events with this call's bytes.
+			EnableNetSendEvents: true,
 			SyscallInterval:    100 * time.Millisecond,
 		})
 		close(loaderDone)
@@ -315,6 +319,7 @@ p.wait()
 with open(%q, "w") as f:
     f.write(str(p.pid))
 s = socket.create_connection(("127.0.0.1", %d), timeout=5)
+s.send(b"hello")
 s.close()
 u = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 u.connect(("127.0.0.1", %d))
@@ -455,6 +460,8 @@ FOUND:
 	var closeEv *capturedEvent
 	var writeEv *capturedEvent
 	var readEv *capturedEvent
+	var tcpSendEv *capturedEvent
+	var udpSendEv *capturedEvent
 	for i := range events {
 		ev := &events[i]
 		if ev.Type == "net_connect" && ev.PID == uint32(lastWorkload.pyPID) && ev.Protocol == 17 {
@@ -470,6 +477,15 @@ FOUND:
 		}
 		if ev.Type == "file_read" && ev.PID == uint32(lastWorkload.pyPID) {
 			readEv = ev
+		}
+		// Slice 3: the workload's 5-byte TCP send and 1-byte UDP
+		// send must surface as discrete net_send events with this
+		// call's bytes.
+		if ev.Type == "net_send" && ev.PID == uint32(lastWorkload.pyPID) && ev.Protocol == 6 && ev.Dport == listenPort {
+			tcpSendEv = ev
+		}
+		if ev.Type == "net_send" && ev.PID == uint32(lastWorkload.pyPID) && ev.Protocol == 17 && ev.Dport == udpPort {
+			udpSendEv = ev
 		}
 	}
 	if udpEv == nil {
@@ -495,12 +511,30 @@ FOUND:
 	if readEv == nil {
 		fail("missing file_read for workload interpreter (pid %d) despite --enable-file-rw-events", lastWorkload.pyPID)
 	}
+	if tcpSendEv == nil {
+		fail("missing TCP net_send to 127.0.0.1:%d (pid %d) despite --enable-net-send-events", listenPort, lastWorkload.pyPID)
+	}
+	if tcpSendEv.Bytes == nil || *tcpSendEv.Bytes != 5 {
+		fail("TCP net_send bytes = %v, want 5 (one 5-byte send call): %s", tcpSendEv.Bytes, tcpSendEv.Raw)
+	}
+	if tcpSendEv.Daddr != "127.0.0.1" {
+		fail("TCP net_send daddr = %q, want 127.0.0.1: %s", tcpSendEv.Daddr, tcpSendEv.Raw)
+	}
+	if tcpSendEv.AgentName != agentName {
+		fail("TCP net_send agent_name = %q, want %q", tcpSendEv.AgentName, agentName)
+	}
+	if udpSendEv == nil {
+		fail("missing UDP net_send to 127.0.0.1:%d (pid %d) despite --enable-net-send-events", udpPort, lastWorkload.pyPID)
+	}
+	if udpSendEv.Bytes == nil || *udpSendEv.Bytes != 1 {
+		fail("UDP net_send bytes = %v, want 1 (one 1-byte send call): %s", udpSendEv.Bytes, udpSendEv.Raw)
+	}
 
 	if pyExec.SessionID == 0 || fileOpen.SessionID != pyExec.SessionID ||
 		connect.SessionID != pyExec.SessionID || trueExec.SessionID == 0 ||
-		writeEv.SessionID != pyExec.SessionID {
-		fail("session IDs disagree: exec=%d file_open=%d connect=%d child_exec=%d file_write=%d",
-			pyExec.SessionID, fileOpen.SessionID, connect.SessionID, trueExec.SessionID, writeEv.SessionID)
+		writeEv.SessionID != pyExec.SessionID || tcpSendEv.SessionID != pyExec.SessionID {
+		fail("session IDs disagree: exec=%d file_open=%d connect=%d child_exec=%d file_write=%d net_send=%d",
+			pyExec.SessionID, fileOpen.SessionID, connect.SessionID, trueExec.SessionID, writeEv.SessionID, tcpSendEv.SessionID)
 	}
 
 	// Our programs, for the post-shutdown link cross-reference.
@@ -521,7 +555,7 @@ FOUND:
 		fail("reading stats map: %v", err)
 	}
 	var totalDrops, totalEmitted uint64
-	for typ := uint32(1); typ <= 14; typ++ {
+	for typ := uint32(1); typ <= 15; typ++ {
 		vals := make([]statVal, possibleCPUs())
 		key := typ
 		if err := statsMap.Lookup(&key, &vals); err != nil {

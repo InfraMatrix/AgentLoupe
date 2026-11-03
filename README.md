@@ -88,6 +88,8 @@ Opt-in probes (off by default):
 --enable-file-rw-events    # discrete file_read/file_write event per vfs call
                            # (ABI v5: this call's size + timestamps only;
                            # works without --enable-io-accounting)
+--enable-net-send-events   # discrete net_send event per tcp/udp_sendmsg call
+                           # (ABI v6: this call's bytes + destination)
 ```
 
 ### Try the demo (one command)
@@ -241,6 +243,22 @@ still come from `file_close`, so nothing double-counts).
 | `file_ptr`, `open_ts_ns` | Correlation key for one open (same as `file_close`). |
 | `bytes` | This call's byte count. |
 | `duration_us` | Per-call latency in microseconds, paired by the fentry probes. **0 means unknown** (entry missed, fentry degraded/unattached) **or sub-microsecond** — never a dropped event. |
+
+#### `net_send` events
+
+With `--enable-net-send-events`, the loader emits one discrete event per
+`tcp_sendmsg`/`udp_sendmsg` call on a tracked socket — the network-side
+equivalent of the file `file_read`/`file_write` events. `bytes` is
+**this call's** byte count (the call's return value; failed calls emit
+nothing), with the destination (`daddr`, `dport`) and source port from
+the socket. TCP destinations always come from the sock; unconnected UDP
+sends carry a per-call destination parsed from the message (connected
+UDP falls back to the sock). Same volume warning as the rw events: this
+fires on every send a tracked process makes. The events land in the
+timeline as per-destination markers (with byte counts) and in the
+scorecard as `net_sends`/`net_sent_bytes` totals (per-destination send
+volume stays in the timeline's net entries). No per-call latency field:
+slice 3 is attribution first.
 
 ### Session lifecycle: `root_exit` and orphans
 

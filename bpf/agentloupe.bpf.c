@@ -1232,6 +1232,124 @@ int handle_enter_connect(struct sys_enter_ctx *ctx)
 	return 0;
 }
 
+/* Slice 3: one discrete event per tcp/udp_sendmsg call on a tracked
+ * socket, carrying this call's byte count and destination — the
+ * network-side equivalent of slice 2a. Opt-in via enable_net_send_events
+ * (slot 6): per-send volume is as loud as per-call rw events. Only
+ * successful calls emit (the callers skip ret <= 0, like account_io):
+ * there is no errno to report and nothing to attribute on failure.
+ * TCP destination always comes from the sock; UDP additionally consults
+ * msg->msg_name for unconnected sends (connected UDP falls back to the
+ * sock, same as TCP). Runs in the caller's process context;
+ * resolve_scope attributes to the sender's session exactly like
+ * net_connect (no REJECTED check, mirroring connect). Destination is
+ * fully validated BEFORE reserve_event: a post-reserve early return
+ * would leak the reservation. */
+static __always_inline void
+emit_net_send(struct sock *sk, struct msghdr *msg, __u64 bytes, bool is_udp)
+{
+	struct session_info info = {};
+	struct event_hdr *hdr;
+	struct ev_net_send *ev;
+	unsigned char daddr[16] = {};
+	__u64 sid = 0, cgid = 0;
+	__u32 tgid = cur_tgid();
+	__u16 family = 0, dport = 0;
+	__u8 proto = is_udp ? IPPROTO_UDP : IPPROTO_TCP;
+	bool have_dest = false;
+
+	if (!cfg_enabled(6))
+		return;
+	if (!resolve_scope(tgid, cur_task(), &sid, &info, &cgid))
+		return;
+	if (is_udp && msg) {
+		/* Unconnected send: the destination is per-call. */
+		if (BPF_CORE_READ(msg, msg_namelen) != 0) {
+			const void *name = BPF_CORE_READ(msg, msg_name);
+			unsigned char sa[28] = {};
+
+			if (name && bpf_probe_read_user(sa, sizeof(sa), name) == 0) {
+				__u16 f = (__u16)sa[0] | ((__u16)sa[1] << 8);
+
+				if (f == AF_INET) {
+					family = f;
+					dport = ((__u16)sa[2] << 8) | sa[3];
+					__builtin_memcpy(daddr, &sa[4], 4);
+					have_dest = true;
+				} else if (f == AF_INET6) {
+					family = f;
+					dport = ((__u16)sa[2] << 8) | sa[3];
+					__builtin_memcpy(daddr, &sa[8], 16);
+					have_dest = true;
+				}
+			}
+		}
+	}
+	if (!have_dest) {
+		family = BPF_CORE_READ(sk, __sk_common.skc_family);
+		if (family != AF_INET && family != AF_INET6)
+			return;
+		if (family == AF_INET) {
+			__u32 a = BPF_CORE_READ(sk, __sk_common.skc_daddr);
+
+			__builtin_memcpy(daddr, &a, 4);
+		} else {
+			struct in6_addr a6 = BPF_CORE_READ(sk, __sk_common.skc_v6_daddr);
+
+			__builtin_memcpy(daddr, &a6, 16);
+		}
+		dport = bpf_ntohs(BPF_CORE_READ(sk, __sk_common.skc_dport));
+	}
+	hdr = reserve_event(EVENT_NET_SEND, EVLEN_NET_SEND, sid, &info,
+			    cur_task(), tgid);
+	if (!hdr)
+		return;
+	ev = (struct ev_net_send *)(void *)(hdr + 1);
+	ev->family = family;
+	ev->protocol = proto;
+	ev->sport = BPF_CORE_READ(sk, __sk_common.skc_num);
+	__builtin_memcpy(ev->daddr, daddr, 16);
+	if (family == AF_INET) {
+		__u32 saddr = BPF_CORE_READ(sk, __sk_common.skc_rcv_saddr);
+
+		__builtin_memcpy(ev->saddr, &saddr, 4);
+	} else {
+		struct in6_addr saddr6 = BPF_CORE_READ(sk, __sk_common.skc_v6_rcv_saddr);
+
+		__builtin_memcpy(ev->saddr, &saddr6, 16);
+	}
+	ev->dport = dport;
+	if (ev->dport == 53)
+		ev->flags |= 1; /* DNS */
+	ev->bytes = bytes;
+	submit_event(hdr, EVENT_NET_SEND);
+}
+
+/* fexit: at exit the return value (bytes accepted) is known. Short and
+ * failed calls (ret <= 0) are skipped — there is nothing to attribute. */
+SEC("fexit/tcp_sendmsg")
+int BPF_PROG(handle_tcp_sendmsg, struct sock *sk, struct msghdr *msg,
+	     size_t size, int ret)
+{
+	(void)msg;
+	(void)size;
+	if (ret <= 0)
+		return 0;
+	emit_net_send(sk, NULL, (__u64)ret, false);
+	return 0;
+}
+
+SEC("fexit/udp_sendmsg")
+int BPF_PROG(handle_udp_sendmsg, struct sock *sk, struct msghdr *msg,
+	     size_t len, int ret)
+{
+	(void)len;
+	if (ret <= 0)
+		return 0;
+	emit_net_send(sk, msg, (__u64)ret, true);
+	return 0;
+}
+
 /* ======================================================================
  * Optional syscall summary: counts only, aggregated per (session, nr).
  * ==================================================================== */
