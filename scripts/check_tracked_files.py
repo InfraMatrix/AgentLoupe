@@ -7,7 +7,9 @@ Fails (exit 1) when either holds for any file in ``git ls-files``:
     slash) — e.g. a capture or report rendered on a developer's
     machine, or a config hardcoding one user's install path; or
   * the file is a ``*.jsonl`` capture tracked anywhere other than
-    ``test/fixtures/`` (the only place synthetic captures belong).
+    ``test/fixtures/`` (synthetic captures) or ``examples/canned/`` (the
+    sanitized real-agent demo run written by scripts/make_canned.py —
+    still subject to the home-path check above).
 
 The needle is assembled at runtime so this script does not itself
 contain the literal it searches for (it is, after all, tracked).
@@ -21,6 +23,7 @@ from pathlib import Path
 
 NEEDLE = b"/" + b"home" + b"/"
 FIXTURE_PREFIX = "test/fixtures/"
+CAPTURE_PREFIXES = (FIXTURE_PREFIX, "examples/canned/")
 
 
 def main() -> int:
@@ -36,9 +39,9 @@ def main() -> int:
     tracked = [p for p in raw.decode("utf-8", "surrogateescape").split("\0") if p]
     failures = []
     for rel in tracked:
-        if rel.endswith(".jsonl") and not rel.startswith(FIXTURE_PREFIX):
+        if rel.endswith(".jsonl") and not rel.startswith(CAPTURE_PREFIXES):
             failures.append(
-                f"{rel}: tracked *.jsonl capture outside {FIXTURE_PREFIX}"
+                f"{rel}: tracked *.jsonl capture outside {' / '.join(CAPTURE_PREFIXES)}"
             )
         try:
             data = (Path(root) / rel).read_bytes()
@@ -54,7 +57,7 @@ def main() -> int:
         print("  (remove the file from the index with: git rm --cached <file>)")
         return 1
     print(f"check-tracked-files: OK ({len(tracked)} tracked files, no home paths, "
-          f"no *.jsonl outside {FIXTURE_PREFIX})")
+          f"no *.jsonl outside {' / '.join(CAPTURE_PREFIXES)})")
     return 0
 
 

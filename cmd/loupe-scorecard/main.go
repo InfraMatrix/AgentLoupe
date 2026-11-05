@@ -20,6 +20,7 @@ type event struct {
 	Type         string   `json:"type"`
 	SessionID    uint64   `json:"session_id"`
 	AgentName    string   `json:"agent_name"`
+	PID          uint32   `json:"pid"`
 	Comm         string   `json:"comm"`
 	Filename     string   `json:"filename"`
 	Path         string   `json:"path"`
@@ -40,6 +41,14 @@ type event struct {
 	Duration     uint64   `json:"duration_ms"`
 	Reason       string   `json:"reason"`
 	StillRunning []uint32 `json:"still_running"`
+	// hasCPU: this exit/root_exit line carried cpu_user_ms (ABI v4+);
+	// older captures omit it and their CPU is unknown, not 0.
+	hasCPU bool
+}
+
+// cpuPresence detects whether an exit line carries resource fields.
+type cpuPresence struct {
+	CPUUserMS *uint64 `json:"cpu_user_ms"`
 }
 
 type scorecard struct {
@@ -73,7 +82,13 @@ type scorecard struct {
 	Hostnames []string `json:"hostnames,omitempty"`
 	CPUUserMS uint64   `json:"cpu_user_ms,omitempty"`
 	CPUSysMS  uint64   `json:"cpu_sys_ms,omitempty"`
-	RootExit  string   `json:"root_exit,omitempty"`
+	// CPUSource says where cpu_user_ms/cpu_sys_ms came from:
+	// "session_end" (the root's /proc sample at session end) or, when
+	// the capture has no session_end CPU (e.g. it stopped before the
+	// session closed), "exits": the sum of every exited process's own
+	// CPU from its exit event (ABI v4). Empty when neither exists.
+	CPUSource string `json:"cpu_source,omitempty"`
+	RootExit  string `json:"root_exit,omitempty"`
 	// OrphanGapS is session_end minus root_exit, in seconds: how
 	// long the session outlived its root. Set only when both exist.
 	OrphanGapS       float64        `json:"orphan_gap_s,omitempty"`
@@ -88,6 +103,11 @@ type scorecard struct {
 	paths            map[string]bool
 	hosts            map[string]bool
 	comms, dirs, net map[string]int
+	exitCPUU         uint64
+	exitCPUS         uint64
+	exitCPUKnown     bool
+	exitPIDs         map[uint32]bool
+	rootExitCPU      []event // root_exit lines, used only if their pid had no exit
 }
 
 func top(m map[string]int, n int) map[string]int {
@@ -117,7 +137,7 @@ func summarize(events []event) []*scorecard {
 		s, ok := byID[ev.SessionID]
 		if !ok {
 			s = &scorecard{SessionID: ev.SessionID, Agent: ev.AgentName,
-				paths: map[string]bool{}, hosts: map[string]bool{},
+				paths: map[string]bool{}, hosts: map[string]bool{}, exitPIDs: map[uint32]bool{},
 				comms: map[string]int{},
 				dirs:  map[string]int{}, net: map[string]int{}}
 			byID[ev.SessionID] = s
@@ -151,6 +171,12 @@ func summarize(events []event) []*scorecard {
 			s.Forks++
 		case "exit":
 			s.Exits++
+			s.exitPIDs[ev.PID] = true
+			if ev.hasCPU {
+				s.exitCPUU += ev.CPUUserMS
+				s.exitCPUS += ev.CPUSysMS
+				s.exitCPUKnown = true
+			}
 		case "file_open":
 			s.Opens++
 			if ev.Path != "" {
@@ -204,6 +230,9 @@ func summarize(events []event) []*scorecard {
 			if s.rootExitT.IsZero() {
 				s.rootExitT = ts
 			}
+			if ev.hasCPU {
+				s.rootExitCPU = append(s.rootExitCPU, ev)
+			}
 		case "session_end":
 			s.sessionEndT = ts
 			s.SessionEndReason = ev.Reason
@@ -212,6 +241,21 @@ func summarize(events []event) []*scorecard {
 		}
 	}
 	for _, s := range order {
+		// root_exit mirrors the root's exit event; count it only when
+		// that exit itself was missed, so nothing is counted twice.
+		for _, re := range s.rootExitCPU {
+			if !s.exitPIDs[re.PID] {
+				s.exitCPUU += re.CPUUserMS
+				s.exitCPUS += re.CPUSysMS
+				s.exitCPUKnown = true
+			}
+		}
+		switch {
+		case s.CPUUserMS != 0 || s.CPUSysMS != 0:
+			s.CPUSource = "session_end"
+		case s.exitCPUKnown:
+			s.CPUUserMS, s.CPUSysMS, s.CPUSource = s.exitCPUU, s.exitCPUS, "exits"
+		}
 		if !s.first.IsZero() {
 			s.Start = s.first.Format(time.RFC3339)
 		}
@@ -261,6 +305,17 @@ func main() {
 		}
 		var ev event
 		if err := json.Unmarshal([]byte(line), &ev); err == nil {
+			// capture_meta (clock anchor + probe set) belongs to no
+			// session; counting it would add a phantom session 0.
+			if ev.Type == "capture_meta" {
+				continue
+			}
+			if ev.Type == "exit" || ev.Type == "root_exit" {
+				var pres cpuPresence
+				if json.Unmarshal([]byte(line), &pres) == nil {
+					ev.hasCPU = pres.CPUUserMS != nil
+				}
+			}
 			events = append(events, ev)
 		}
 	}
@@ -274,9 +329,16 @@ func main() {
 	fmt.Printf("%-22s %-10s %8s %6s %6s %7s %7s %9s %9s %5s %s\n",
 		"agent", "session", "dur", "exec", "fork", "opens", "uniq", "read", "write", "net", "cpu(user+sys ms)")
 	for _, s := range cards {
-		fmt.Printf("%-22s %-10d %7.1fs %6d %6d %7d %7d %9d %9d %5d %d+%d\n",
+		cpu := "-"
+		switch s.CPUSource {
+		case "session_end":
+			cpu = fmt.Sprintf("%d+%d", s.CPUUserMS, s.CPUSysMS)
+		case "exits":
+			cpu = fmt.Sprintf("%d+%d (all processes, from exits)", s.CPUUserMS, s.CPUSysMS)
+		}
+		fmt.Printf("%-22s %-10d %7.1fs %6d %6d %7d %7d %9d %9d %5d %s\n",
 			trunc(s.Agent, 22), s.SessionID%10000000000, s.DurationS, s.Execs, s.Forks,
-			s.Opens, s.UniqPaths, s.ReadBytes, s.WriteBytes, s.Connects, s.CPUUserMS, s.CPUSysMS)
+			s.Opens, s.UniqPaths, s.ReadBytes, s.WriteBytes, s.Connects, cpu)
 		fmt.Printf("    comms=%v dirs=%v net=%v dns=%d sends=%d sent_bytes=%d recvs=%d recv_bytes=%d hosts=%v mutations=%d reads=%d writes=%d\n",
 			s.TopComms, s.TopDirs, s.Net, s.DNS, s.Sends, s.SentBytes, s.Recvs, s.RecvBytes, s.Hostnames, s.Mutations, s.Reads, s.Writes)
 		if s.FirstResp > 0 {

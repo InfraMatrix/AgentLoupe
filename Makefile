@@ -5,6 +5,12 @@
 #   make bpf          Compile bpf/agentloupe.bpf.c -> bpf/agentloupe.bpf.o (CO-RE).
 #   make test         Unit tests only: no kernel, no root (go test ./...).
 #   make integration  Real-kernel integration test. Run as: sudo make integration
+#   make demo-canned  Offline demo, no sudo: renders the scorecard, tool
+#                     spans and AgentCutter analysis of the canned real
+#                     Claude Code run in examples/canned/.
+#   make real-agent   Record a fresh real-agent run (examples/real-agent/
+#                     run.sh: Claude Code fixes a NetworkX bug under the
+#                     loader + hooks). Needs sudo, network, claude CLI.
 #   make demo         One-command live demo (scripts/demo.sh): builds, runs
 #                     the loader with configs/loupe-demo.yaml, runs the demo
 #                     workload, renders scorecard/timeline/HTML. Prompts for
@@ -58,6 +64,24 @@ vet:
 .PHONY: demo
 demo:
 	bash scripts/demo.sh
+
+CANNED ?= examples/canned
+
+.PHONY: demo-canned
+demo-canned:
+	@test -s $(CANNED)/capture.jsonl || { echo "demo-canned: $(CANNED)/capture.jsonl missing"; exit 1; }
+	$(GO) build -o loupe-scorecard ./cmd/loupe-scorecard
+	$(GO) build -o loupe-timeline ./cmd/loupe-timeline
+	@printf '\n== Scorecard (%s) ==\n' "$(CANNED)/capture.jsonl"
+	./loupe-scorecard $(CANNED)/capture.jsonl
+	@printf '\n== Tool spans (harness: %s) ==\n' "$(CANNED)/capture.spans.jsonl"
+	./loupe-timeline --tool-spans --spans $(CANNED)/capture.spans.jsonl $(CANNED)/capture.jsonl
+	@printf '\n== AgentCutter analysis (%s) ==\n' "$(CANNED)/analysis.md"
+	@cat $(CANNED)/analysis.md
+
+.PHONY: real-agent
+real-agent:
+	bash examples/real-agent/run.sh
 
 .PHONY: clean
 clean:

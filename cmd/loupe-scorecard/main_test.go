@@ -71,3 +71,39 @@ func TestSummarizeOrphan(t *testing.T) {
 		t.Error("session 3 missing")
 	}
 }
+
+func TestSummarizeCPUFallsBackToExits(t *testing.T) {
+	events := []event{
+		{Ts: "2026-01-01T00:00:00Z", Type: "session_start", SessionID: 1, PID: 10},
+		{Ts: "2026-01-01T00:00:01Z", Type: "exit", SessionID: 1, PID: 11, CPUUserMS: 300, CPUSysMS: 20, hasCPU: true},
+		{Ts: "2026-01-01T00:00:02Z", Type: "exit", SessionID: 1, PID: 10, CPUUserMS: 50, CPUSysMS: 5, hasCPU: true},
+		// mirrors pid 10's exit: must not be counted again
+		{Ts: "2026-01-01T00:00:02Z", Type: "root_exit", SessionID: 1, PID: 10, CPUUserMS: 50, CPUSysMS: 5, hasCPU: true},
+		// session 2: root exit missed, root_exit stands in
+		{Ts: "2026-01-01T00:00:00Z", Type: "session_start", SessionID: 2, PID: 20},
+		{Ts: "2026-01-01T00:00:03Z", Type: "root_exit", SessionID: 2, PID: 20, CPUUserMS: 7, CPUSysMS: 1, hasCPU: true},
+		// session 3: session_end CPU wins
+		{Ts: "2026-01-01T00:00:00Z", Type: "session_start", SessionID: 3, PID: 30},
+		{Ts: "2026-01-01T00:00:01Z", Type: "exit", SessionID: 3, PID: 31, CPUUserMS: 999, hasCPU: true},
+		{Ts: "2026-01-01T00:00:04Z", Type: "session_end", SessionID: 3, CPUUserMS: 40, CPUSysMS: 4},
+		// session 4: pre-ABI-v4 exit, no CPU anywhere: unknown
+		{Ts: "2026-01-01T00:00:00Z", Type: "session_start", SessionID: 4, PID: 40},
+		{Ts: "2026-01-01T00:00:01Z", Type: "exit", SessionID: 4, PID: 40},
+	}
+	by := map[uint64]*scorecard{}
+	for _, c := range summarize(events) {
+		by[c.SessionID] = c
+	}
+	if c := by[1]; c.CPUUserMS != 350 || c.CPUSysMS != 25 || c.CPUSource != "exits" {
+		t.Errorf("session 1 = %d+%d %q", c.CPUUserMS, c.CPUSysMS, c.CPUSource)
+	}
+	if c := by[2]; c.CPUUserMS != 7 || c.CPUSysMS != 1 || c.CPUSource != "exits" {
+		t.Errorf("session 2 = %d+%d %q", c.CPUUserMS, c.CPUSysMS, c.CPUSource)
+	}
+	if c := by[3]; c.CPUUserMS != 40 || c.CPUSource != "session_end" {
+		t.Errorf("session 3 = %d %q", c.CPUUserMS, c.CPUSource)
+	}
+	if c := by[4]; c.CPUUserMS != 0 || c.CPUSource != "" {
+		t.Errorf("session 4 = %d %q, want unknown", c.CPUUserMS, c.CPUSource)
+	}
+}
