@@ -117,6 +117,30 @@ appears in the capture alongside the demo sessions. Outputs:
 drop counters), `demo-timeline.txt`. Set `FORCE_TP=1` to rehearse the
 tracepoint-fallback probe set on an LSM host (see Troubleshooting).
 
+### Real-agent demo (Claude Code + hooks) and the offline canned run
+
+```sh
+make demo-canned   # offline, no sudo: scorecard + tool spans + AgentCutter
+                   # analysis of the canned run in examples/canned/
+make real-agent    # record a fresh run (examples/real-agent/run.sh)
+```
+
+`examples/real-agent/run.sh` clones NetworkX at a pinned commit
+(networkx-3.5), injects a one-line bug in
+`networkx/algorithms/shortest_paths/weighted.py` (`<` → `<=` in
+Dijkstra's relaxation, so equal-length paths stop being recorded as
+predecessors: 4 tests fail), installs the hook in the clone's
+`.claude/settings.json`, and runs `claude -p` under the loader
+(`--catalog-only claude-code`, syscall summary, io accounting, net
+send/recv events) with a prompt to set up a venv, fix the bug without
+touching tests, and run the full suite. Run it from a plain terminal:
+sudo needs the TTY, and a `claude` started from inside another tracked
+Claude Code session would be folded into that session. `SAVE_CANNED=1`
+also refreshes `examples/canned/` through `scripts/make_canned.py`,
+which keeps only the demo session, sanitizes paths and the user name,
+and renders `report.json` and `analysis.md` (AgentCutter; a real model
+call when `META_MODEL_API_KEY` is set, otherwise its dry run).
+
 ### Attaching to already-running agents
 
 ```sh
@@ -180,6 +204,129 @@ and the page says so when that happens. Captures without
 `syscall_summary` events (older captures, or runs without
 `--enable-syscall-summary`) still render everything else, with a note
 that syscall rates are unavailable.
+
+### Tool spans: which tool call used what
+
+`loupe-timeline` (text, `--json`, and the `--tool-spans` table) breaks
+each session into **tool spans** — "tool call #12 (pytest) used 40s CPU,
+300 MB of reads, 3 round trips" rather than "the session made 62 opens".
+
+```sh
+./loupe-timeline --tool-spans capture.jsonl            # span table per session
+./loupe-timeline --json capture.jsonl | jq '.sessions[].tool_spans'
+./loupe-timeline --agent-process claude capture.jsonl  # agent wrapped by a launcher
+```
+
+**Layer 1 — process tree (no harness cooperation).** Most harnesses run
+each tool as a child process (Claude Code's Bash tool spawns
+`bash -c ...`), so each direct child subtree of the agent process is one
+span (`source: "process_tree"`). The agent process is the session root
+unless `--agent-process NAME` picks an earlier-matching comm / exec
+basename / argv[0] (for harnesses that wrap the agent; processes outside
+the chosen agent's tree are counted in `agent_self` and reported as
+`agent_process.outside_agent_tree`). A span carries `span_id`, root pid,
+the first exec's argv (truncated: 16 args, 200 B each, 800 B total) and,
+for `sh/bash -c`, the `command` payload; start/end, `wall_ms`, the root's
+`exit_code`; and resources aggregated over the whole subtree:
+
+| `resources` field | Source |
+|---|---|
+| `cpu_user_ms`, `cpu_sys_ms`, `max_rss_kb` | `exit` events (ABI v4), summed (RSS: max) over the subtree. `cpu_incomplete` = some processes had not exited by capture end. |
+| `file_opens`, `file_open_failures`, `files_mutated` | `file_open`, unlink/rename/chmod events. |
+| `file_reads`, `file_writes`, `read_bytes`, `write_bytes` | per-call `file_read`/`file_write` events when collected, else `file_close` totals (`--enable-io-accounting`); the session's `io_bytes_source` says which. |
+| `net_connects`, `dns_connects`, `net_sends`, `net_recvs`, `net_sent_bytes`, `net_recv_bytes` | net events; `top_destinations` per span. |
+| `syscalls_by_category`, `syscalls_total` | `syscall_summary` `per_process_counts` (interval-granular). |
+
+A field is **null** when the capture did not collect that signal (probe
+off, per the `capture_meta` record or, for older captures, inferred from
+which event types appear) — a 0 is always a measured zero.
+
+- **Nested shells**: `bash -c "pytest"` and everything it starts is one
+  span, whatever the depth.
+- **Daemonized / orphaned children** are attributed to the span that
+  forked them (parentage is fixed at fork time, so a reparent to init or
+  a subreaper does not move them) and the span is flagged
+  `outlived_span` with `subtree_end_ms`.
+- **Parallel tools**: overlapping spans list each other in `parallel_with`.
+- **`agent_self`**: events of the agent process itself (in-process tools,
+  model calls, interpreter startup, sleeps) are an explicit bucket, never
+  dropped. Every session reports independent `resource_totals` and
+  `tool_span_reconciliation`: `sum(tool_spans) + agent_self == totals` on
+  every additive field; a failure is also written to the report notes.
+
+**Layer 2 — harness spans via Claude Code hooks.** `hooks/agentloupe_hook.py`
+(Python standard library only) is a `PreToolUse` / `PostToolUse` /
+`PostToolUseFailure` command hook that appends one JSONL line per event —
+`event` (`pre`/`post`/`post_failure`), `tool_name`, `tool_use_id`,
+`session_id`, `ts_ns` (CLOCK_REALTIME), `mono_ns` (CLOCK_MONOTONIC), `pid`,
+`ppid`, `ancestors`, an `input` summary, and on post `duration_ms`
+(Claude Code's own tool time). The input summary keeps only known short
+keys (`command`, `file_path`, `pattern`, `url`, ...) truncated to 300
+chars; anything else (file `content`, `old_string`/`new_string`, ...) is
+reduced to its length under `_sizes`, so file contents are never
+recorded. It prints nothing and always exits 0: it cannot block or alter
+a tool call.
+
+Install it in `.claude/settings.json` (project) or `~/.claude/settings.json`
+(user) — `hooks/claude-settings.example.json`:
+
+```json
+{
+  "hooks": {
+    "PreToolUse":         [{ "matcher": "*", "hooks": [{ "type": "command", "command": "python3 /path/to/AgentLoupe/hooks/agentloupe_hook.py" }] }],
+    "PostToolUse":        [{ "matcher": "*", "hooks": [{ "type": "command", "command": "python3 /path/to/AgentLoupe/hooks/agentloupe_hook.py" }] }],
+    "PostToolUseFailure": [{ "matcher": "*", "hooks": [{ "type": "command", "command": "python3 /path/to/AgentLoupe/hooks/agentloupe_hook.py" }] }]
+  }
+}
+```
+
+The spans file is `$AGENTLOUPE_SPANS`, else
+`$AGENTLOUPE_CAPTURE_DIR/spans.jsonl`, else `/tmp/agentloupe/spans.jsonl`.
+Name it `<capture>.spans.jsonl` (e.g. `AGENTLOUPE_SPANS=run.spans.jsonl`
+next to `run.jsonl`) and `loupe-timeline` picks it up automatically;
+otherwise pass `--spans FILE`.
+
+Correlation (report `harness` section): a harness call is the pre→post
+interval of one `tool_use_id`, placed in the session whose agent process
+is an ancestor of the hook (or that contains the hook's own process).
+Child-process spans starting inside that interval are matched to it —
+first by the Bash `command` appearing in the subtree's argv, then for
+process-spawning tools (Bash, Grep, Glob) by time containment, innermost
+call first — and merged into one span, `source: "harness+process_tree"`,
+carrying `tool_name`, `tool_use_id`, `input`, `status`
+(`ok`/`error`/`interrupted`/`no_post`), `harness_duration_ms` and
+`process_wall_ms`. Calls with no child process (Read, Edit, Write, Glob
+when in-process, ...) become `source: "harness"` spans with
+`attribution: "time_window"`: the agent process's own file and network
+events inside the window move from `agent_self` into the span.
+**This is approximate** — any concurrent in-process work in that window
+(model streaming, a parallel tool) is included; overlapping windows give
+each event to the innermost (latest-starting) call and say so in the
+span's `notes`; CPU and syscall counts are whole-process / per-interval
+numbers and stay in `agent_self` (null on the span). Child processes the
+agent starts on its own (e.g. `git status`) during a Read window stay
+plain `process_tree` spans. The hook's own processes are spans tagged
+`role: "hook"` (observation overhead) linked to their `tool_use_id`.
+
+**Clocks.** BPF timestamps are `bpf_ktime_get_ns()` — CLOCK_MONOTONIC
+(no suspend time, NTP-slewed). The loader renders `ts` as
+`wall_base + ktime`, where `wall_base` (CLOCK_REALTIME − CLOCK_MONOTONIC
+at loader start) is written once to the capture's first line, a
+`capture_meta` record (`session_id` 0; readers skip it; it also carries
+the probe set). The hook records CLOCK_MONOTONIC too, so hook time maps to
+capture time exactly: `wall_base_unix_ns + mono_ns`
+(`harness.clock.method: "monotonic"`). CLOCK_REALTIME would be wrong by
+any suspend or NTP step since loader start; it is used only for captures
+without `capture_meta`, shifted by an offset estimated from the hook's own
+processes in the capture (`realtime_pid_anchored`, biased by the fastest
+hook startup) or as-is when none are found (`realtime_assumed`). Every
+method reports anchor residuals — hook timestamp minus its own process's
+start, which must be ≥ 0 and a few ms of interpreter startup.
+
+Not covered: harnesses without hooks get process-tree spans only, and
+in-process work (model calls, in-process file tools) stays in
+`agent_self`; naming it needs harness cooperation or, for model calls,
+user-space TLS uprobes (future work).
 
 #### `syscall_summary` events
 
@@ -333,7 +480,12 @@ gone before any `/proc` sampling could see them have numbers:
 
 These complement — not replace — the `cpu_user_ms`/`cpu_sys_ms` on
 `session_end`, which remain the session **root's** totals sampled from
-`/proc` and say nothing about child tools.
+`/proc` and say nothing about child tools. `loupe-scorecard` reports the
+`session_end` figure when there is one; when there is not (e.g. the
+capture stopped before the session closed) it falls back to the sum of
+every exited process's exit CPU (a `root_exit` counts only if the root's
+`exit` was missed), and `cpu_source` (`session_end` / `exits`) says
+which. With neither, the CPU column shows `-`.
 
 Useful loader flags: `--drop-path-prefix /proc/` (repeatable) suppresses
 file-event noise (e.g. agents polling their own `/proc/<pid>/stat`);
@@ -465,9 +617,12 @@ and file paths still use `bpf_d_path` (`"path_src": "d_path"`).
 bpf/            eBPF C (single TU) + shared ABI header
 cmd/agentloupe/ loader entrypoint (flags, signals, --max-runtime)
 cmd/loupe-scorecard/ per-session totals from a capture
-cmd/loupe-timeline/  per-session timeline + breakdown (text / JSON / HTML)
+cmd/loupe-timeline/  per-session timeline + breakdown + tool spans (text / JSON / HTML)
+hooks/          Claude Code tool-call hook (harness spans) + settings example
 internal/app/   loader: feature probe, attach, maps, events, housekeeping
 internal/config/ agents.yaml parsing
 configs/        example configuration
-scripts/        build-time safety checks, one-command demo (demo.sh)
+scripts/        build-time safety checks, one-command demo (demo.sh),
+                canned-run export (make_canned.py)
+examples/       demo workload, real-agent run script, canned real-agent run
 ```

@@ -35,6 +35,7 @@ type rawEvent struct {
 	Ts           string                       `json:"ts"`
 	Type         string                       `json:"type"`
 	SessionID    uint64                       `json:"session_id"`
+	ParentSID    uint64                       `json:"parent_session_id"`
 	AgentName    string                       `json:"agent_name"`
 	Comm         string                       `json:"comm"`
 	PID          uint32                       `json:"pid"`
@@ -64,6 +65,21 @@ type rawEvent struct {
 	MaxRSSKB     uint64                       `json:"max_rss_kb"`
 	Reason       string                       `json:"reason"`
 	StillRunning []uint32                     `json:"still_running"`
+	ReadBytes    uint64                       `json:"read_bytes"`
+	WriteBytes   uint64                       `json:"write_bytes"`
+	Result       *int32                       `json:"result"`
+	// capture_meta (loader clock anchor + probe set)
+	WallBaseUnixNS int64           `json:"wall_base_unix_ns"`
+	Probes         map[string]bool `json:"probes"`
+
+	// hasCPU: the exit/root_exit line carried cpu_user_ms at all (ABI
+	// v4+). Older captures omit it; their CPU is unknown, not 0.
+	hasCPU bool
+}
+
+// cpuPresence detects whether an exit line carries resource fields.
+type cpuPresence struct {
+	CPUUserMS *uint64 `json:"cpu_user_ms"`
 }
 
 type Process struct {
@@ -213,6 +229,16 @@ type SessionReport struct {
 	HasSyscallSummary bool                      `json:"has_syscall_summary"`
 	Files             []*PathStat               `json:"files_touched"`
 	Network           []*NetStat                `json:"network_destinations"`
+	// Tool spans (additive): each direct child subtree of the agent
+	// process is one span; harness hook records, when supplied, name
+	// and merge them. agent_self holds everything else, so
+	// sum(tool_spans) + agent_self == resource_totals.
+	AgentProcess       *AgentProcess       `json:"agent_process,omitempty"`
+	ToolSpans          []*ToolSpan         `json:"tool_spans"`
+	AgentSelf          *ToolSpan           `json:"agent_self,omitempty"`
+	ResourceTotals     *SpanResources      `json:"resource_totals,omitempty"`
+	IOBytesSource      string              `json:"io_bytes_source,omitempty"`
+	SpanReconciliation *SpanReconciliation `json:"tool_span_reconciliation,omitempty"`
 }
 
 type Report struct {
@@ -224,6 +250,11 @@ type Report struct {
 	HasSyscallSummary bool             `json:"has_syscall_summary"`
 	Notes             []string         `json:"notes,omitempty"`
 	Sessions          []*SessionReport `json:"sessions"`
+	// Probes is the loader's capture_meta probe set (absent on captures
+	// predating capture_meta; availability is then inferred).
+	Probes map[string]bool `json:"probes,omitempty"`
+	// Harness describes the hook spans file, if one was correlated.
+	Harness *HarnessInfo `json:"harness,omitempty"`
 }
 
 // ---- streaming builder ----
@@ -250,6 +281,9 @@ type sessionBuilder struct {
 	summaries    []summaryPoint
 	markerSeen   int
 	markerStride int
+	recs         []spanRec
+	sb           *spanBuild
+	parentSID    uint64 // from session_start: nested session of this parent
 }
 
 func (b *sessionBuilder) addMarker(m *Marker) {
@@ -285,6 +319,21 @@ type builder struct {
 	skipped     int
 	hasSummary  bool
 	hasPerProc  bool
+	opts        Options
+	meta        *rawEvent
+	seenTypes   map[string]bool
+	closeBytes  bool // some file_close carried nonzero byte totals
+}
+
+// Options are the additive reducer knobs (flags).
+type Options struct {
+	// AgentProcess names the process tool spans hang off (comm, exec
+	// basename, or argv[0] basename; earliest match per session) for
+	// harnesses that wrap the agent. Default: the session root.
+	AgentProcess string
+	// Hooks is a harness spans JSONL stream (hooks/agentloupe_hook.py).
+	Hooks     io.Reader
+	HooksName string
 }
 
 func (b *builder) session(ev *rawEvent) *sessionBuilder {
@@ -346,10 +395,24 @@ func protoName(p uint8) string {
 }
 
 func (b *builder) add(ev *rawEvent) {
+	if ev.Type == "capture_meta" {
+		// Capture-level record (no session): clock anchor + probes.
+		if b.meta == nil {
+			b.meta = ev
+		}
+		return
+	}
 	b.total++
 	ts, hasTS := parseTS(ev.Ts)
 	s := b.session(ev)
 	s.rep.Events++
+	b.seenTypes[ev.Type] = true
+	if ev.Type == "file_close" && (ev.ReadBytes != 0 || ev.WriteBytes != 0) {
+		b.closeBytes = true
+	}
+	if hasTS {
+		s.record(ev, ts)
+	}
 	if hasTS {
 		if s.first.IsZero() || ts.Before(s.first) {
 			s.first = ts
@@ -388,6 +451,9 @@ func (b *builder) add(ev *rawEvent) {
 		s.rep.SessionEndReason = ev.Reason
 		s.rep.StillRunning = ev.StillRunning
 	case "session_start":
+		if s.parentSID == 0 {
+			s.parentSID = ev.ParentSID
+		}
 		if s.rep.RootComm == "" {
 			s.rep.RootComm = ev.Comm
 		}
@@ -643,7 +709,12 @@ func parseTS(s string) (time.Time, bool) {
 
 // Build streams JSONL from r and returns the aggregated report.
 func Build(r io.Reader) (*Report, error) {
-	b := &builder{sessions: map[uint64]*sessionBuilder{}}
+	return BuildWithOptions(r, Options{})
+}
+
+// BuildWithOptions is Build plus tool-span options.
+func BuildWithOptions(r io.Reader, opts Options) (*Report, error) {
+	b := &builder{sessions: map[uint64]*sessionBuilder{}, opts: opts, seenTypes: map[string]bool{}}
 	br := bufio.NewReaderSize(r, 64*1024)
 	for {
 		line, err := br.ReadString('\n')
@@ -653,6 +724,12 @@ func Build(r io.Reader) (*Report, error) {
 			if jerr := json.Unmarshal([]byte(line), &ev); jerr != nil {
 				b.skipped++
 			} else {
+				if ev.Type == "exit" || ev.Type == "root_exit" {
+					var pres cpuPresence
+					if json.Unmarshal([]byte(line), &pres) == nil {
+						ev.hasCPU = pres.CPUUserMS != nil
+					}
+				}
 				b.add(&ev)
 			}
 		}
@@ -837,11 +914,13 @@ func (b *builder) finish() *Report {
 		if len(r.Network) > 20 {
 			r.Network = r.Network[:20]
 		}
+		s.sb = buildProcessSpans(s.recs, b.opts.AgentProcess)
 		rep.Sessions = append(rep.Sessions, r)
 	}
 	sort.SliceStable(rep.Sessions, func(i, j int) bool {
 		return rep.Sessions[i].Start < rep.Sessions[j].Start
 	})
+	b.finishSpans(rep)
 	return rep
 }
 
@@ -1256,6 +1335,7 @@ func writeText(w io.Writer, rep *Report) {
 			}
 			fmt.Fprintln(w)
 		}
+		writeSessionSpans(w, s)
 		fmt.Fprintln(w, "process tree:")
 		for _, p := range s.Processes {
 			indent := strings.Repeat("  ", p.Depth)
@@ -1278,9 +1358,12 @@ func writeText(w io.Writer, rep *Report) {
 func main() {
 	htmlOut := flag.String("html", "", "write a self-contained HTML timeline to this file")
 	asJSON := flag.Bool("json", false, "write the breakdown as JSON to stdout")
+	spansPath := flag.String("spans", "", "harness tool-call spans JSONL (hooks/agentloupe_hook.py); default: <capture>.spans.jsonl if it exists")
+	agentProc := flag.String("agent-process", "", "process the tool spans hang off (comm / exec basename / argv[0] basename), for harnesses that wrap the agent; default: session root")
+	spansOnly := flag.Bool("tool-spans", false, "text mode: print only the per-session tool span table")
 	flag.Parse()
 	if flag.NArg() < 1 {
-		fmt.Fprintln(os.Stderr, "usage: loupe-timeline [--html out.html] [--json] capture.jsonl")
+		fmt.Fprintln(os.Stderr, "usage: loupe-timeline [--html out.html] [--json] [--tool-spans] [--spans spans.jsonl] [--agent-process NAME] capture.jsonl")
 		os.Exit(2)
 	}
 	f, err := os.Open(flag.Arg(0))
@@ -1288,7 +1371,24 @@ func main() {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
-	rep, err := Build(f)
+	opts := Options{AgentProcess: *agentProc}
+	sp := *spansPath
+	if sp == "" {
+		cand := strings.TrimSuffix(flag.Arg(0), ".jsonl") + ".spans.jsonl"
+		if st, serr := os.Stat(cand); serr == nil && !st.IsDir() && cand != flag.Arg(0) {
+			sp = cand
+		}
+	}
+	if sp != "" {
+		hf, herr := os.Open(sp)
+		if herr != nil {
+			fmt.Fprintln(os.Stderr, herr)
+			os.Exit(1)
+		}
+		defer hf.Close()
+		opts.Hooks, opts.HooksName = hf, filepath.Base(sp)
+	}
+	rep, err := BuildWithOptions(f, opts)
 	f.Close()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -1316,6 +1416,10 @@ func main() {
 		return
 	}
 	if *htmlOut == "" {
+		if *spansOnly {
+			writeSpansText(os.Stdout, rep)
+			return
+		}
 		writeText(os.Stdout, rep)
 	}
 }

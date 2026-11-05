@@ -450,6 +450,21 @@ func Run(ctx context.Context, o Options) error {
 	}()
 
 	wallBase := wallBaseTime()
+	// One capture-level record first: the clock anchor (so harness hook
+	// timestamps map into capture time exactly) and the probe set (so
+	// reducers can tell measured-zero from not-collected).
+	if err := writeJSON(newCaptureMeta(wallBase, map[string]bool{
+		"lsm_mode":          lsmMode,
+		"io_accounting":     o.EnableIOAccounting,
+		"file_rw_events":    o.EnableFileRWEvents,
+		"file_rw_latency":   o.EnableFileRWEvents && latAttached == 4,
+		"net_send_events":   o.EnableNetSendEvents && sendAttached == 2,
+		"net_recv_events":   o.EnableNetSendEvents && recvAttached == 2,
+		"net_send_hostname": o.EnableNetSendEvents && hostAttached == 1,
+		"syscall_summary":   o.EnableSyscallSummary,
+	})); err != nil {
+		return fmt.Errorf("write capture_meta: %w", err)
+	}
 	proc := NewProcessor(loader, wallBase, writeJSON)
 	proc.DropPrefixes = o.DropPathPrefixes
 	proc.OrphanTimeout = o.OrphanTimeout

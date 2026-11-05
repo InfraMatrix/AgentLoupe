@@ -28,3 +28,7 @@
 # Editor / OS noise at the repo root only
 /.vscode/
 /.idea/
+
+# Python bytecode (scripts/, hooks/)
+__pycache__/
+*.pyc
