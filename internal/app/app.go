@@ -371,7 +371,11 @@ func Run(ctx context.Context, o Options) error {
 	if err := loader.populateRules(cfg, logf); err != nil {
 		return err
 	}
-	loader.adoptRunning(cfg, logf)
+	// Adoption (the /proc walk) runs AFTER the hooks attach, below. Walking
+	// first would leave a window where an agent exec'd, or a child forked
+	// by an already-running agent, after the walk but before the hooks
+	// exist is seen by neither and missed for good. Rules are populated
+	// above, so the exec hook scopes new agents from the moment it attaches.
 
 	// Attach. Links are held only in this slice; Close detaches.
 	var links []link.Link
@@ -433,6 +437,11 @@ func Run(ctx context.Context, o Options) error {
 	if len(fallbacks) > 0 {
 		logf("feature probe: failed/fallback hooks: %s", strings.Join(fallbacks, ", "))
 	}
+	// Now that exec/fork are hooked: adopt what was already running. A
+	// process the kernel scoped in the meantime is already in
+	// tracked_sessions and is skipped; children forked during the walk are
+	// picked up by adoptRunning's re-scan (adoptLateChildren).
+	loader.adoptRunning(cfg, logf)
 	logf("probes enabled: process=yes file_open=yes file_mutations=yes network=yes io_accounting=%v file_rw_events=%v file_rw_latency=%v net_send_events=%v net_send_hostnames=%v net_recv_events=%v syscall_summary=%v",
 		o.EnableIOAccounting, o.EnableFileRWEvents, o.EnableFileRWEvents && latAttached == 4, o.EnableNetSendEvents && sendAttached == 2, o.EnableNetSendEvents && hostAttached == 1, o.EnableNetSendEvents && recvAttached == 2, o.EnableSyscallSummary)
 

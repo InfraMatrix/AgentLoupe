@@ -214,7 +214,7 @@ func newLoader(coll *ebpf.Collection) (*Loader, error) {
 	l.runID = uint64(binary.LittleEndian.Uint32(rnd[:]))
 	// Seed session counter: kernel allocates (run_id << 32) | counter.
 	seed := (l.runID << 32) | 1
-	l.nextSID = seed
+	l.nextSID = (l.runID << 32) | adoptSIDBit | 1 // adoption's own range
 	key0 := uint32(0)
 	val := make([]byte, 8)
 	binary.LittleEndian.PutUint64(val, seed-1)
@@ -689,6 +689,7 @@ func (l *Loader) adoptRunning(cfg *config.File, logf func(string, ...any)) {
 		}
 	}
 	adopted := 0
+	newSIDs := map[uint64]bool{} // sessions created by this call
 	for _, e := range snap {
 		rule, ok := matchProcEntry(cfg, e)
 		if !ok {
@@ -706,7 +707,10 @@ func (l *Loader) adoptRunning(cfg *config.File, logf func(string, ...any)) {
 		sid := l.allocSIDForAdoption()
 		raw := makeSessionInfo(2, uint32(rule.Index), 8 /*SESSION_F_FROM_PROC*/, tgid, 0, e.CgID, rule.Name, e.Comm)
 		key := sid
-		if err := sessions.Update(&key, &raw, ebpf.UpdateAny); err != nil {
+		// NoExist: adoption ids live in their own range, so this never
+		// collides with a kernel session; if it ever did, skip rather
+		// than overwrite a live session.
+		if err := sessions.Update(&key, &raw, ebpf.UpdateNoExist); err != nil {
 			continue
 		}
 		var sidVal [8]byte
@@ -717,6 +721,7 @@ func (l *Loader) adoptRunning(cfg *config.File, logf func(string, ...any)) {
 		}
 		delete(l.metaCache, sid)
 		l.adopted[tgid] = sid
+		newSIDs[sid] = true
 		adopted++
 		// BFS: pre-existing descendants join the root's session.
 		queue := append([]int{}, children[e.PID]...)
@@ -737,20 +742,92 @@ func (l *Loader) adoptRunning(cfg *config.File, logf func(string, ...any)) {
 			}
 		}
 	}
+	late := 0
+	if len(newSIDs) > 0 {
+		// Children forked after the snapshot but before their parent was
+		// inserted: the fork hook saw an untracked parent and the
+		// snapshot predates them. Re-scan until a pass finds none.
+		late = adoptLateChildren(scanProc,
+			func(tgid uint32) (uint64, bool) {
+				var v [8]byte
+				if err := tracked.Lookup(&tgid, &v); err != nil {
+					return 0, false
+				}
+				return binary.LittleEndian.Uint64(v[:]), true
+			},
+			func(tgid uint32, sid uint64) bool {
+				var v [8]byte
+				binary.LittleEndian.PutUint64(v[:], sid)
+				if tracked.Update(&tgid, &v, ebpf.UpdateNoExist) != nil {
+					return false
+				}
+				l.adopted[tgid] = sid
+				return true
+			},
+			newSIDs, adoptLatePasses)
+	}
 	if adopted > 0 {
-		logf("adoption scan: adopted %d already-running agent processes (with existing children)", adopted)
+		logf("adoption scan: adopted %d already-running agent processes (with existing children; %d forked during the scan)", adopted, late)
 	}
 }
+
+// adoptLatePasses bounds the re-scans; each pass only has to catch forks
+// that happened during the previous one, so a few always suffice in
+// practice (a fork storm faster than a /proc scan is the only way to
+// need more, and those forks are caught by the kernel once their parent
+// is tracked).
+const adoptLatePasses = 8
+
+// adoptLateChildren closes the fork race of an adoption scan. Once a
+// process is in tracked_sessions the kernel fork hook propagates its
+// session to every later child; a child forked BEFORE that insert (but
+// after the /proc snapshot) is invisible to both. Such children still
+// exist in /proc, so: scan, and add every untracked process whose parent
+// is tracked in a session this adoption created; repeat until a pass
+// adds nothing. Only sessions created by this adoption are extended:
+// kernel-created sessions are the fork hook's job (and REJECTED ones
+// must not grow). Returns the number of processes added.
+//
+// Residual gap: a child that forked and exited during the window leaves
+// its own children re-parented away from the session (double-fork
+// daemonisation inside one scan); they are not found.
+func adoptLateChildren(scan func() []procEntry, lookup func(uint32) (uint64, bool),
+	insert func(uint32, uint64) bool, newSIDs map[uint64]bool, maxPasses int) int {
+	total := 0
+	for pass := 0; pass < maxPasses; pass++ {
+		added := 0
+		for _, e := range scan() {
+			child := uint32(e.PID)
+			if _, ok := lookup(child); ok {
+				continue
+			}
+			psid, ok := lookup(uint32(e.PPID))
+			if !ok || !newSIDs[psid] {
+				continue
+			}
+			if insert(child, psid) {
+				added++
+			}
+		}
+		total += added
+		if added == 0 {
+			break
+		}
+	}
+	return total
+}
+
+// adoptSIDBit splits the per-run id space: the kernel allocates
+// (run_id << 32) | n with an atomic counter, adoption allocates
+// (run_id << 32) | adoptSIDBit | n from its own counter. Adoption runs
+// while hooks are live, so sharing the kernel counter from userspace
+// (which cannot fetch-and-add on it) could hand out an id the kernel
+// already used; disjoint ranges make that impossible.
+const adoptSIDBit = uint64(1) << 31
 
 func (l *Loader) allocSIDForAdoption() uint64 {
 	sid := l.nextSID
 	l.nextSID++
-	if m := l.coll.Maps["session_counter"]; m != nil {
-		key0 := uint32(0)
-		val := make([]byte, 8)
-		binary.LittleEndian.PutUint64(val, l.nextSID-1)
-		_ = m.Update(&key0, &val, ebpf.UpdateAny)
-	}
 	return sid
 }
 
