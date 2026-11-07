@@ -89,6 +89,10 @@ static __always_inline bool cfg_enabled(__u32 which)
 		return cfg->enable_file_rw_events != 0;
 	if (which == 6)
 		return cfg->enable_net_send_events != 0;
+	if (which == 7)
+		return cfg->enable_comm_rules != 0;
+	if (which == 8)
+		return cfg->journal_untracked != 0;
 	return false;
 }
 

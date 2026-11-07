@@ -262,3 +262,12 @@ func TestLoadUnreadablePath(t *testing.T) {
 		t.Error("existed = true for a directory, want false")
 	}
 }
+
+func TestWatchedPathsIncludesLiteralDirExeGlobs(t *testing.T) {
+	f := &File{Agents: AttachRules(nil, []string{"claude"}, []string{"/opt/agents/bin/agent-*", "/opt/*/bin/agent"})}
+	got := f.WatchedPaths()
+	want := []string{"/opt/agents/bin/agent-*"} // dir with a wildcard cannot be watched
+	if len(got) != 1 || got[0] != want[0] {
+		t.Fatalf("WatchedPaths = %v, want %v", got, want)
+	}
+}

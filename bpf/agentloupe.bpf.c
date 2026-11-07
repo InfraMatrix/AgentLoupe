@@ -59,6 +59,45 @@ static struct pending_file_op zero_pending;
  * subprogram it is verified once. Four arguments — within the 5-arg
  * BPF-to-BPF call limit.
  */
+/*
+ * --attach-comm rules (ABI v9): does the exec'ing process's name match
+ * agent_comms? Tried against the task comm (already the new image's name
+ * here: begin_new_exec sets it before either exec hook runs) and against
+ * the exe's file name, mirroring the userspace /proc matcher (comm, or
+ * basename of /proc/PID/exe). Copies the matched agent_ref into *out
+ * (a stack struct, so no map-value pointer crosses the call). Only called
+ * when config.enable_comm_rules is set: at most two hash lookups, and
+ * nothing at all on hosts without --attach-comm. Observe-only: the exec
+ * has already been committed when this runs.
+ */
+static __noinline bool
+comm_rule_match(struct task_struct *task, struct file *file, struct agent_ref *out)
+{
+	struct comm_key key = {};
+	struct agent_ref *ref;
+	const unsigned char *name;
+	long n;
+
+	BPF_CORE_READ_STR_INTO(&key.name, task, comm);
+	ref = bpf_map_lookup_elem(&agent_comms, &key);
+	if (!ref && file) {
+		__builtin_memset(&key, 0, sizeof(key));
+		name = BPF_CORE_READ(file, f_path.dentry, d_name.name);
+		if (!name)
+			return false;
+		n = bpf_probe_read_kernel_str(key.name, sizeof(key.name), name);
+		/* n == sizeof(key.name) may be a truncated longer name: only
+		 * names userspace could have stored exactly (<= 30 chars). */
+		if (n <= 0 || n >= (long)sizeof(key.name))
+			return false;
+		ref = bpf_map_lookup_elem(&agent_comms, &key);
+	}
+	if (!ref)
+		return false;
+	__builtin_memcpy(out, ref, sizeof(*out));
+	return true;
+}
+
 static __noinline struct ev_exec *
 exec_core(struct task_struct *task, struct linux_binprm *bprm,
 	  struct file **file_out, struct event_hdr **hdr_out)
@@ -71,7 +110,7 @@ exec_core(struct task_struct *task, struct linux_binprm *bprm,
 	__u64 sid = 0, parent_sid = 0, cgid = 0;
 	__u64 parent_cgid;
 	__u32 tgid = cur_tgid();
-	bool provisional = false, have_session;
+	bool provisional = false, have_session, journal = false;
 
 	*file_out = NULL;
 	*hdr_out = NULL;
@@ -156,6 +195,26 @@ exec_core(struct task_struct *task, struct linux_binprm *bprm,
 			__sync_fetch_and_add(&dc->exec_no_file, 1);
 	}
 
+	if (!have_session && cfg_enabled(7)) {
+		/* --attach-comm: decided here, at exec, like binary rules. */
+		struct agent_ref cref = {};
+
+		if (comm_rule_match(task, file, &cref)) {
+			struct create_session_args a = {
+				.task = task, .ref = &cref,
+				.parent_sid = 0,
+				.cgroup_id = bpf_get_current_cgroup_id(),
+				.state = SESSION_STATE_CONFIRMED,
+				.flags = SESSION_F_FROM_COMM,
+			};
+
+			sid = create_session(tgid, &a);
+			if (!sid)
+				return NULL;
+			goto emit;
+		}
+	}
+
 	if (!have_session) {
 		/* Last chance: cgroup-matched service exec'ing something. */
 		if (!resolve_scope(tgid, task, &sid, &info, &cgid)) {
@@ -163,7 +222,14 @@ exec_core(struct task_struct *task, struct linux_binprm *bprm,
 
 			if (c)
 				__sync_fetch_and_add(&c->exec_out_of_scope, 1);
-			return NULL; /* not an agent action */
+			if (!cfg_enabled(8))
+				return NULL; /* not an agent action */
+			/* Startup journal: record it (session 0); userspace keeps
+			 * it only if the process belongs to an adopted agent. */
+			__builtin_memset(&info, 0, sizeof(info));
+			sid = 0;
+			journal = true;
+			goto reserve;
 		}
 	} else if (info.state == SESSION_STATE_PROVISIONAL) {
 		provisional = true;
@@ -172,6 +238,7 @@ exec_core(struct task_struct *task, struct linux_binprm *bprm,
 emit:
 	if (!load_session_info(sid, &info))
 		return NULL;
+reserve:
 	hdr = reserve_event(EVENT_EXEC, EVLEN_EXEC, sid, &info, task, tgid);
 	if (!hdr)
 		return NULL;
@@ -188,6 +255,8 @@ emit:
 		ev->audit_sessionid = BPF_CORE_READ(task, sessionid);
 	if (provisional)
 		hdr->flags |= EVENT_F_PROVISIONAL;
+	if (journal)
+		hdr->flags |= EVENT_F_JOURNAL;
 	*hdr_out = hdr;
 	return ev;
 	(void)cgid;
@@ -278,6 +347,29 @@ struct fork_raw_args {
 	__u64 args[2]; /* (task_struct *parent, task_struct *child) */
 };
 
+/* Startup journal (ABI v9): an out-of-scope fork, recorded with session 0
+ * and EVENT_F_JOURNAL so userspace can link children of adopted agents
+ * even when an intermediate process exits before the /proc walk sees it.
+ * Only while config.journal_untracked is set (the startup window);
+ * nothing is tracked or changed. __noinline keeps it out of handle_fork's
+ * verifier budget. */
+static __noinline void
+journal_fork(struct task_struct *parent, struct task_struct *child, __u32 ptgid, __u32 ctgid)
+{
+	struct session_info none = {};
+	struct event_hdr *hdr;
+	struct ev_fork *ev;
+
+	hdr = reserve_event(EVENT_FORK, EVLEN_FORK, 0, &none, parent, ptgid);
+	if (!hdr)
+		return;
+	hdr->flags |= EVENT_F_JOURNAL;
+	ev = (struct ev_fork *)(void *)(hdr + 1);
+	ev->child_tgid = ctgid;
+	ev->child_pid = task_pid_in_ns(child, ctgid);
+	submit_event(hdr, EVENT_FORK);
+}
+
 SEC("raw_tp/sched_process_fork")
 int handle_fork(struct fork_raw_args *ctx)
 {
@@ -299,8 +391,11 @@ int handle_fork(struct fork_raw_args *ctx)
 		/* Parent may be an undiscovered cgroup service member. */
 		__u64 cgid = 0;
 
-		if (!resolve_scope(ptgid, parent, &sid, &info, &cgid))
+		if (!resolve_scope(ptgid, parent, &sid, &info, &cgid)) {
+			if (cfg_enabled(8))
+				journal_fork(parent, child, ptgid, ctgid);
 			return 0;
+		}
 		/* resolve_scope created the session on the PARENT; fall through */
 	}
 	/* REJECTED never reaches here: in_scope() excludes it, so a rejected

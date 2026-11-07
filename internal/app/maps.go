@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -176,6 +177,7 @@ type Loader struct {
 	prevBinaryKeys    map[[16]byte]bool
 	prevCandidateKeys map[[16]byte]bool
 	prevCgroupKeys    map[uint64]bool
+	prevCommKeys      map[[commKeyLen]byte]bool
 
 	flushState map[flushKey]flushVal
 }
@@ -214,7 +216,7 @@ func newLoader(coll *ebpf.Collection) (*Loader, error) {
 	l.runID = uint64(binary.LittleEndian.Uint32(rnd[:]))
 	// Seed session counter: kernel allocates (run_id << 32) | counter.
 	seed := (l.runID << 32) | 1
-	l.nextSID = seed
+	l.nextSID = (l.runID << 32) | adoptSIDBit | 1 // adoption's own range
 	key0 := uint32(0)
 	val := make([]byte, 8)
 	binary.LittleEndian.PutUint64(val, seed-1)
@@ -232,7 +234,7 @@ func (l *Loader) setConfig(ioAccounting, syscallSummary, fileMutations, fileRWEv
 		return fmt.Errorf("config_map missing from object")
 	}
 	key0 := uint32(0)
-	val := make([]byte, 32)
+	val := make([]byte, configSize)
 	binary.LittleEndian.PutUint64(val[0:8], l.runID)
 	// struct agentloupe_config: run_id, enable_syscall_summary,
 	// enable_file_io_accounting, enable_file_mutations, net_udp_only,
@@ -246,24 +248,47 @@ func (l *Loader) setConfig(ioAccounting, syscallSummary, fileMutations, fileRWEv
 	binary.LittleEndian.PutUint32(val[20:24], 0) // net_udp_only: set post-attach
 	binary.LittleEndian.PutUint32(val[24:28], boolToU32(fileRWEvents))
 	binary.LittleEndian.PutUint32(val[28:32], boolToU32(netSendEvents))
+	// ABI v9: enable_comm_rules (set by populateRules), journal_untracked
+	// (set around the startup adoption): both start off.
+	binary.LittleEndian.PutUint32(val[32:36], 0)
+	binary.LittleEndian.PutUint32(val[36:40], 0)
 	return m.Update(&key0, &val, ebpf.UpdateAny)
 }
 
-// setNetUDPOnly flips the enter_connect mode once attach results are
-// known: true means the TCP fexit probes are live, so the syscall probe
-// must emit SOCK_DGRAM only.
-func (l *Loader) setNetUDPOnly(udpOnly bool) error {
+// struct agentloupe_config: 40 bytes since ABI v9. Field offsets used by
+// setConfigFlag.
+const (
+	configSize             = 40
+	cfgOffNetUDPOnly       = 20
+	cfgOffCommRules        = 32
+	cfgOffJournalUntracked = 36
+)
+
+// setConfigFlag flips one u32 toggle in place (read-modify-write; the
+// loader is the only writer).
+func (l *Loader) setConfigFlag(off int, on bool) error {
 	m := l.coll.Maps["config_map"]
 	if m == nil {
 		return fmt.Errorf("config_map missing from object")
 	}
 	key0 := uint32(0)
-	val := make([]byte, 32) // must match sizeof(struct agentloupe_config)
+	val := make([]byte, configSize)
 	if err := m.Lookup(&key0, &val); err != nil {
 		return err
 	}
-	binary.LittleEndian.PutUint32(val[20:24], boolToU32(udpOnly))
+	binary.LittleEndian.PutUint32(val[off:off+4], boolToU32(on))
 	return m.Update(&key0, &val, ebpf.UpdateAny)
+}
+
+// setJournal turns the startup journal on or off: while on, the kernel
+// emits out-of-scope forks/execs as EVENT_F_JOURNAL records.
+func (l *Loader) setJournal(on bool) error { return l.setConfigFlag(cfgOffJournalUntracked, on) }
+
+// setNetUDPOnly flips the enter_connect mode once attach results are
+// known: true means the TCP fexit probes are live, so the syscall probe
+// must emit SOCK_DGRAM only.
+func (l *Loader) setNetUDPOnly(udpOnly bool) error {
+	return l.setConfigFlag(cfgOffNetUDPOnly, udpOnly)
 }
 
 func boolToU32(b bool) uint32 {
@@ -293,16 +318,42 @@ func (l *Loader) populateRules(cfg *config.File, logf func(string, ...any)) erro
 	binMap := l.coll.Maps["agent_binaries"]
 	candMap := l.coll.Maps["candidates"]
 	cgMap := l.coll.Maps["agent_cgroups"]
-	if binMap == nil || candMap == nil || cgMap == nil {
+	commMap := l.coll.Maps["agent_comms"]
+	if binMap == nil || candMap == nil || cgMap == nil || commMap == nil {
 		return fmt.Errorf("rule maps missing from object")
 	}
 	wantBin := make(map[[16]byte][36]byte)
 	wantCand := make(map[[16]byte][36]byte)
 	wantCG := make(map[uint64][36]byte)
+	wantComm := make(map[[commKeyLen]byte][36]byte)
 
 	for _, a := range cfg.Agents {
 		ref := agentRefValue(a.Index, a.Name)
 		m := a.Match
+		// --attach-comm / --attach-exe: decided in the kernel at exec
+		// (agent_comms / agent_binaries), not only by the /proc scans.
+		switch m.K8SLabel {
+		case "__attach_comm__":
+			if key, ok := commKey(m.Cgroup); ok {
+				wantComm[key] = ref
+			} else {
+				logf("warn: --attach-comm %q: longer than %d characters, matched by the periodic /proc scan only", m.Cgroup, commKeyMaxName)
+			}
+			continue
+		case "__attach_exe__":
+			paths, capped := expandExeGlob(m.Cgroup)
+			if capped {
+				logf("warn: --attach-exe %q matches more than %d files; only the first %d are matched at exec (the rest by the periodic /proc scan)", m.Cgroup, maxExeGlobMatches, maxExeGlobMatches)
+			}
+			for _, p := range paths {
+				if key, err := resolveBinaryID(p); err == nil {
+					wantBin[key] = ref
+				}
+			}
+			continue
+		case "__attach_pid__":
+			continue // an existing process: the /proc scan is the right tool
+		}
 		if m.ExecPath != "" {
 			key, err := resolveBinaryID(m.ExecPath)
 			if err != nil {
@@ -382,9 +433,73 @@ func (l *Loader) populateRules(cfg *config.File, logf func(string, ...any)) erro
 	l.prevBinaryKeys = apply(binMap, wantBin, l.prevBinaryKeys)
 	l.prevCandidateKeys = apply(candMap, wantCand, l.prevCandidateKeys)
 	l.prevCgroupKeys = applyCG(wantCG, l.prevCgroupKeys)
-	logf("rules: %d binaries, %d interpreter candidates, %d cgroups",
-		len(wantBin), len(wantCand), len(wantCG))
+	next := make(map[[commKeyLen]byte]bool)
+	for k := range l.prevCommKeys {
+		if _, ok := wantComm[k]; !ok {
+			key := k
+			_ = commMap.Delete(&key)
+		}
+	}
+	for k, v := range wantComm {
+		key, val := k, v
+		if err := commMap.Update(&key, &val, ebpf.UpdateAny); err != nil {
+			logf("warn: comm rule map update: %v", err)
+			continue
+		}
+		next[k] = true
+	}
+	l.prevCommKeys = next
+	// Gate the per-exec name lookup: zero cost unless --attach-comm is used.
+	if err := l.setConfigFlag(cfgOffCommRules, len(next) > 0); err != nil {
+		logf("warn: set enable_comm_rules: %v", err)
+	}
+	logf("rules: %d binaries, %d interpreter candidates, %d cgroups, %d process names",
+		len(wantBin), len(wantCand), len(wantCG), len(next))
 	return nil
+}
+
+// struct comm_key (ABI v9): a NUL-padded name. The kernel matches it
+// against the task comm (<= 15 chars) and the exe's file name; it only
+// matches file names it can read whole, i.e. <= commKeyMaxName chars.
+const (
+	commKeyLen     = 32
+	commKeyMaxName = commKeyLen - 2
+)
+
+func commKey(name string) ([commKeyLen]byte, bool) {
+	var k [commKeyLen]byte
+	if name == "" || len(name) > commKeyMaxName {
+		return k, false
+	}
+	copy(k[:], name)
+	return k, true
+}
+
+// maxExeGlobMatches caps one --attach-exe pattern's kernel entries
+// (agent_binaries holds MAX_AGENT_BINARIES = 1024 for all rules): an
+// over-broad glob must not fill the map or scope half the system.
+const maxExeGlobMatches = 256
+
+// expandExeGlob returns the regular, executable files a pattern matches
+// now (sorted, capped). Re-run on config reload and when a watched
+// directory changes, so binaries installed later are picked up.
+func expandExeGlob(pattern string) (paths []string, capped bool) {
+	matches, err := filepath.Glob(pattern)
+	if err != nil {
+		return nil, false
+	}
+	sort.Strings(matches)
+	for _, m := range matches {
+		st, err := os.Stat(m)
+		if err != nil || !st.Mode().IsRegular() || st.Mode().Perm()&0o111 == 0 {
+			continue
+		}
+		if len(paths) == maxExeGlobMatches {
+			return paths, true
+		}
+		paths = append(paths, m)
+	}
+	return paths, false
 }
 
 // ---- session map access (raw 88-byte session_info) ----
@@ -664,11 +779,14 @@ func matchProcEntry(cfg *config.File, e procEntry) (config.Agent, bool) {
 // descendants. Safe to call periodically: inserts use UpdateNoExist and
 // a lost race deletes the just-created session rather than orphaning a
 // kernel-created one.
-func (l *Loader) adoptRunning(cfg *config.File, logf func(string, ...any)) {
+//
+// Returns the sessions this call created (the startup journal extends
+// exactly these).
+func (l *Loader) adoptRunning(cfg *config.File, logf func(string, ...any)) map[uint64]bool {
 	sessions := l.coll.Maps["sessions"]
 	tracked := l.coll.Maps["tracked_sessions"]
 	if sessions == nil || tracked == nil {
-		return
+		return nil
 	}
 	snap := scanProc()
 	alive := map[int]bool{}
@@ -689,6 +807,7 @@ func (l *Loader) adoptRunning(cfg *config.File, logf func(string, ...any)) {
 		}
 	}
 	adopted := 0
+	newSIDs := map[uint64]bool{} // sessions created by this call
 	for _, e := range snap {
 		rule, ok := matchProcEntry(cfg, e)
 		if !ok {
@@ -706,7 +825,10 @@ func (l *Loader) adoptRunning(cfg *config.File, logf func(string, ...any)) {
 		sid := l.allocSIDForAdoption()
 		raw := makeSessionInfo(2, uint32(rule.Index), 8 /*SESSION_F_FROM_PROC*/, tgid, 0, e.CgID, rule.Name, e.Comm)
 		key := sid
-		if err := sessions.Update(&key, &raw, ebpf.UpdateAny); err != nil {
+		// NoExist: adoption ids live in their own range, so this never
+		// collides with a kernel session; if it ever did, skip rather
+		// than overwrite a live session.
+		if err := sessions.Update(&key, &raw, ebpf.UpdateNoExist); err != nil {
 			continue
 		}
 		var sidVal [8]byte
@@ -717,6 +839,7 @@ func (l *Loader) adoptRunning(cfg *config.File, logf func(string, ...any)) {
 		}
 		delete(l.metaCache, sid)
 		l.adopted[tgid] = sid
+		newSIDs[sid] = true
 		adopted++
 		// BFS: pre-existing descendants join the root's session.
 		queue := append([]int{}, children[e.PID]...)
@@ -737,20 +860,93 @@ func (l *Loader) adoptRunning(cfg *config.File, logf func(string, ...any)) {
 			}
 		}
 	}
-	if adopted > 0 {
-		logf("adoption scan: adopted %d already-running agent processes (with existing children)", adopted)
+	late := 0
+	if len(newSIDs) > 0 {
+		// Children forked after the snapshot but before their parent was
+		// inserted: the fork hook saw an untracked parent and the
+		// snapshot predates them. Re-scan until a pass finds none.
+		late = adoptLateChildren(scanProc,
+			func(tgid uint32) (uint64, bool) {
+				var v [8]byte
+				if err := tracked.Lookup(&tgid, &v); err != nil {
+					return 0, false
+				}
+				return binary.LittleEndian.Uint64(v[:]), true
+			},
+			func(tgid uint32, sid uint64) bool {
+				var v [8]byte
+				binary.LittleEndian.PutUint64(v[:], sid)
+				if tracked.Update(&tgid, &v, ebpf.UpdateNoExist) != nil {
+					return false
+				}
+				l.adopted[tgid] = sid
+				return true
+			},
+			newSIDs, adoptLatePasses)
 	}
+	if adopted > 0 {
+		logf("adoption scan: adopted %d already-running agent processes (with existing children; %d forked during the scan)", adopted, late)
+	}
+	return newSIDs
 }
+
+// adoptLatePasses bounds the re-scans; each pass only has to catch forks
+// that happened during the previous one, so a few always suffice in
+// practice (a fork storm faster than a /proc scan is the only way to
+// need more, and those forks are caught by the kernel once their parent
+// is tracked).
+const adoptLatePasses = 8
+
+// adoptLateChildren closes the fork race of an adoption scan. Once a
+// process is in tracked_sessions the kernel fork hook propagates its
+// session to every later child; a child forked BEFORE that insert (but
+// after the /proc snapshot) is invisible to both. Such children still
+// exist in /proc, so: scan, and add every untracked process whose parent
+// is tracked in a session this adoption created; repeat until a pass
+// adds nothing. Only sessions created by this adoption are extended:
+// kernel-created sessions are the fork hook's job (and REJECTED ones
+// must not grow). Returns the number of processes added.
+//
+// Residual gap: a child that forked and exited during the window leaves
+// its own children re-parented away from the session (double-fork
+// daemonisation inside one scan); they are not found.
+func adoptLateChildren(scan func() []procEntry, lookup func(uint32) (uint64, bool),
+	insert func(uint32, uint64) bool, newSIDs map[uint64]bool, maxPasses int) int {
+	total := 0
+	for pass := 0; pass < maxPasses; pass++ {
+		added := 0
+		for _, e := range scan() {
+			child := uint32(e.PID)
+			if _, ok := lookup(child); ok {
+				continue
+			}
+			psid, ok := lookup(uint32(e.PPID))
+			if !ok || !newSIDs[psid] {
+				continue
+			}
+			if insert(child, psid) {
+				added++
+			}
+		}
+		total += added
+		if added == 0 {
+			break
+		}
+	}
+	return total
+}
+
+// adoptSIDBit splits the per-run id space: the kernel allocates
+// (run_id << 32) | n with an atomic counter, adoption allocates
+// (run_id << 32) | adoptSIDBit | n from its own counter. Adoption runs
+// while hooks are live, so sharing the kernel counter from userspace
+// (which cannot fetch-and-add on it) could hand out an id the kernel
+// already used; disjoint ranges make that impossible.
+const adoptSIDBit = uint64(1) << 31
 
 func (l *Loader) allocSIDForAdoption() uint64 {
 	sid := l.nextSID
 	l.nextSID++
-	if m := l.coll.Maps["session_counter"]; m != nil {
-		key0 := uint32(0)
-		val := make([]byte, 8)
-		binary.LittleEndian.PutUint64(val, l.nextSID-1)
-		_ = m.Update(&key0, &val, ebpf.UpdateAny)
-	}
 	return sid
 }
 

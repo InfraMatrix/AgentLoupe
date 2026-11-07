@@ -193,7 +193,7 @@ var agentloupeMapNames = map[string]bool{
 	"syscall_counts": true, "session_counter": true, "config_map": true,
 	"stats": true, "counters": true, "path_scratch_ma": true,
 	"pending_file_op": true, "rw_inflight": true, "snd_hostnames": true,
-	"send_inflight": true, "events": true,
+	"send_inflight": true, "events": true, "agent_comms": true,
 }
 
 func TestIntegrationLoaderObserveOnly(t *testing.T) {

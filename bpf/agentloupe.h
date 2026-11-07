@@ -56,7 +56,7 @@
 #ifndef AGENTLOUPE_H
 #define AGENTLOUPE_H
 
-#define AGENTLOUPE_ABI_VERSION 8
+#define AGENTLOUPE_ABI_VERSION 9
 
 /* Minimum kernel for full (LSM) mode; the loader enforces this, the
  * header only documents it. Fallback floor is 5.8. */
@@ -68,6 +68,8 @@
 #define MAX_SESSIONS         8192   /* entries in sessions (incl. tombs.) */
 #define MAX_AGENT_BINARIES   1024   /* configured tool binaries           */
 #define MAX_CANDIDATES       256    /* interpreter binaries (node, ...)   */
+#define MAX_AGENT_COMMS      256    /* --attach-comm names (ABI v9)       */
+#define COMM_KEY_LEN         32     /* comm (<=15) or exe file name (<=30)*/
 #define MAX_AGENT_CGROUPS    2048   /* resolved cgroup IDs (v2 only)      */
 #define MAX_FILE_INFOS       16384  /* struct file * -> fd_info (LRU)     */
 #define MAX_SYSCALL_COUNTS   65536  /* (session, tgid, nr) counters (LRU): ~64 sessions x 32 procs x 32 nrs */
@@ -143,6 +145,7 @@ enum session_state {
 #define SESSION_F_FROM_CGROUP  (1U << 2) /* matched agent_cgroups            */
 #define SESSION_F_FROM_PROC    (1U << 3) /* adopted by startup /proc scan    */
 #define SESSION_F_INTERPRETER  (1U << 4) /* confirmed interpreter session    */
+#define SESSION_F_FROM_COMM    (1U << 5) /* matched agent_comms at exec      */
 
 /* event_hdr.flags */
 #define EVENT_F_TRUNCATED      (1U << 0) /* a string field hit its bound    */
@@ -150,6 +153,13 @@ enum session_state {
 #define EVENT_F_ERROR          (1U << 2) /* payload result/exit indicates err */
 #define EVENT_F_PARTIAL        (1U << 3) /* FILE_IO flush, not a final close */
 #define EVENT_F_PATH_PARTIAL   (1U << 4) /* a path was truncated/incomplete */
+#define EVENT_F_JOURNAL        (1U << 5) /* startup journal (ABI v9): an
+                                          * OUT-OF-SCOPE fork/exec recorded
+                                          * while the loader adopts running
+                                          * agents; session_id is 0. Userspace
+                                          * relabels the ones that turn out to
+                                          * belong to an adopted session and
+                                          * drops the rest. */
 
 /* ---- Map key/value types ------------------------------------------------ */
 
@@ -181,6 +191,14 @@ struct agent_ref {
 	__u32 rule_id;                    /* index into userspace config       */
 	char  agent_name[AGENT_NAME_LEN];
 };                                        /* 36 bytes                          */
+
+/* agent_comms key (ABI v9): a process name, NUL-padded. Matched at exec
+ * against the task comm (<= 15 chars) and against the exe's file name
+ * (<= COMM_KEY_LEN - 2 chars; longer names are not matched in the kernel
+ * and stay with the userspace /proc scan). */
+struct comm_key {
+	char name[COMM_KEY_LEN];
+};                                        /* 32 bytes                          */
 
 /* Kernel-side session state: session_id -> metadata + lifecycle state.
  * Parent linkage and agent metadata live HERE, not in tracked_sessions.
@@ -341,7 +359,12 @@ struct agentloupe_config {
 	                                     * only, no per-call latency yet)  */
 	__u32 enable_net_send_events;      /* gates per-call send AND recv events (ABI v6/v8,
 	                                     * slices 3/5; slice 4 hostnames ride the same slot)  */
-};                                        /* 32 bytes                          */
+	__u32 enable_comm_rules;          /* agent_comms is non-empty: gates the
+	                                     * per-exec name lookup (ABI v9)    */
+	__u32 journal_untracked;          /* startup window only: emit OUT-OF-
+	                                     * SCOPE fork/exec as EVENT_F_JOURNAL
+	                                     * records (ABI v9)                 */
+};                                        /* 40 bytes                          */
 
 /* ---- Event records -------------------------------------------------------
  *
@@ -593,7 +616,8 @@ _Static_assert(sizeof(struct ev_file_close) == 552, "ev_file_close ABI changed")
 _Static_assert(sizeof(struct ev_file_rw) == 552, "ev_file_rw ABI changed");
 _Static_assert(sizeof(struct ev_net_send) == 112, "ev_net_send ABI changed");
 _Static_assert(sizeof(struct ev_net_recv) == 120, "ev_net_recv ABI changed");
-_Static_assert(sizeof(struct agentloupe_config) == 32, "agentloupe_config ABI changed");
+_Static_assert(sizeof(struct agentloupe_config) == 40, "agentloupe_config ABI changed");
+_Static_assert(sizeof(struct comm_key) == 32, "comm_key ABI changed");
 _Static_assert(sizeof(struct session_info) == 88, "session_info ABI changed");
 _Static_assert(sizeof(struct tracked_session) == 8, "tracked_session ABI changed");
 _Static_assert(sizeof(struct fd_info) == 568, "fd_info ABI changed");
@@ -648,6 +672,15 @@ struct {
 	__type(key, struct binary_id);
 	__type(value, struct agent_ref);
 } candidates SEC(".maps");
+
+/* process name -> agent, for --attach-comm rules (ABI v9). Looked up at
+ * exec only when config.enable_comm_rules is set. */
+struct {
+	__uint(type, BPF_MAP_TYPE_HASH);
+	__uint(max_entries, MAX_AGENT_COMMS);
+	__type(key, struct comm_key);
+	__type(value, struct agent_ref);
+} agent_comms SEC(".maps");
 
 /* cgroup v2 ID -> agent, for deployed services. cgroup v2 is REQUIRED:
  * bpf_get_current_cgroup_id() identifies tasks in the v2 hierarchy, and

@@ -70,8 +70,25 @@ func watchDirs(ctx context.Context, dirs func() []string, interesting func() []s
 				break
 			}
 			names := map[string]bool{}
+			var patterns []string // --attach-exe globs: match by pattern
 			for _, p := range interesting() {
-				names[filepath.Base(p)] = true
+				base := filepath.Base(p)
+				if strings.ContainsAny(base, "*?[") {
+					patterns = append(patterns, base)
+				} else {
+					names[base] = true
+				}
+			}
+			matches := func(name string) bool {
+				if names[name] {
+					return true
+				}
+				for _, pat := range patterns {
+					if ok, _ := filepath.Match(pat, name); ok {
+						return true
+					}
+				}
+				return false
 			}
 			for off := 0; off+unix.SizeofInotifyEvent <= nr; {
 				nameLen := int(binary.LittleEndian.Uint32(buf[off+12 : off+16]))
@@ -80,7 +97,7 @@ func watchDirs(ctx context.Context, dirs func() []string, interesting func() []s
 					raw := buf[off+unix.SizeofInotifyEvent : off+unix.SizeofInotifyEvent+nameLen]
 					name = strings.TrimRight(string(raw), "\x00")
 				}
-				if name == "" || names[name] {
+				if name == "" || matches(name) {
 					relevant = true
 				}
 				off += unix.SizeofInotifyEvent + nameLen

@@ -371,7 +371,17 @@ func Run(ctx context.Context, o Options) error {
 	if err := loader.populateRules(cfg, logf); err != nil {
 		return err
 	}
-	loader.adoptRunning(cfg, logf)
+	// Adoption (the /proc walk) runs AFTER the hooks attach, below. Walking
+	// first would leave a window where an agent exec'd, or a child forked
+	// by an already-running agent, after the walk but before the hooks
+	// exist is seen by neither and missed for good. Rules are populated
+	// above, so the exec hook scopes new agents from the moment it attaches.
+
+	// Startup journal on BEFORE the hooks attach, off once adoption is
+	// done (finishStartupJournal): see journal.go.
+	if err := loader.setJournal(true); err != nil {
+		logf("warn: startup journal unavailable: %v", err)
+	}
 
 	// Attach. Links are held only in this slice; Close detaches.
 	var links []link.Link
@@ -449,6 +459,20 @@ func Run(ctx context.Context, o Options) error {
 		rd.Close() // unblocks Read; kernel detaches everything on exit
 	}()
 
+	// Now that exec/fork are hooked: adopt what was already running. A
+	// process the kernel scoped in the meantime is already in
+	// tracked_sessions and is skipped; children forked during the walk are
+	// picked up by adoptRunning's re-scan (adoptLateChildren), and ones
+	// linked only through a process that has since exited by the startup
+	// journal. The pump drains the ring meanwhile so it cannot fill.
+	pump := startJournalPump(rd, logf)
+	newSIDs := loader.adoptRunning(cfg, logf)
+	startupRecords, err := loader.finishStartupJournal(rd, pump, newSIDs, logf)
+	if err != nil && (errors.Is(err, ringbuf.ErrClosed) || ctx.Err() != nil) {
+		logf("shutting down during startup: closing links and collection (all programs detach)")
+		return nil
+	}
+
 	wallBase := wallBaseTime()
 	// One capture-level record first: the clock anchor (so harness hook
 	// timestamps map into capture time exactly) and the probe set (so
@@ -497,13 +521,15 @@ func Run(ctx context.Context, o Options) error {
 	interesting := func() []string {
 		return append([]string{o.ConfigPath}, loader.Rules().WatchedPaths()...)
 	}
+	configSeen := existed // a config file has been loaded at some point
 	go watchDirs(watcherCtx, reloadDirs, interesting, func() {
 		newCfg, existed, err := config.Load(o.ConfigPath)
 		if err != nil {
 			logf("warn: config reload: %v (keeping previous rules)", err)
 			return
 		}
-		if !existed {
+		if !reloadWithConfig(existed, &configSeen) {
+			logf("config %s disappeared — keeping previous rules", o.ConfigPath)
 			return
 		}
 		newCfg = mergeExtras(newCfg)
@@ -522,6 +548,20 @@ func Run(ctx context.Context, o Options) error {
 
 	logf("running (dev mode: detach on exit, nothing pinned)%s", maxRuntimeNote(ctx))
 	decodeErrs := 0
+	// Records from the startup window first, in ring order (journal
+	// records already relabeled or removed by finishStartupJournal).
+	for _, raw := range startupRecords {
+		d, err := Decode(raw)
+		if err != nil {
+			decodeErrs++
+			if decodeErrs <= 5 {
+				logf("warn: decode record: %v", err)
+			}
+			continue
+		}
+		proc.Process(d)
+	}
+	startupRecords = nil
 	for {
 		rec, err := rd.Read()
 		if err != nil {
@@ -545,6 +585,19 @@ func Run(ctx context.Context, o Options) error {
 		}
 		proc.Process(d)
 	}
+}
+
+// reloadWithConfig decides whether a watcher-triggered reload proceeds.
+// Without any config file the rules come only from --attach-*/--catalog,
+// and those must still be re-applied (e.g. an --attach-exe glob gaining a
+// binary). Once a config file has been loaded, its disappearing (deleted,
+// or mid-replace) keeps the previous rules instead of wiping them.
+func reloadWithConfig(existed bool, seen *bool) bool {
+	if existed {
+		*seen = true
+		return true
+	}
+	return !*seen
 }
 
 func netModeLabel(kprobeFailed int) string {

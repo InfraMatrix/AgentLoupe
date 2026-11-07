@@ -177,8 +177,24 @@ sudo ./agentloupe --attach-pid 1234 --attach-comm claude --attach-exe '/usr/bin/
   --bpf-object bpf/agentloupe.bpf.o
 ```
 
-Adoption runs at startup and re-runs every 5s (and after config reloads),
-so agents started after Loupe are adopted without a config entry.
+New processes are scoped by the kernel at exec: binary rules, interpreter
+rules, cgroups, and (since ABI v9) `--attach-exe` (the glob is expanded to
+binaries, re-expanded when a literal directory changes, capped at 256 per
+pattern) and `--attach-comm` (process name or exe file name, up to 30
+characters; one extra hash lookup per exec, only when such a rule exists).
+The kernel never blocks or delays an exec beyond that lookup: the exec hooks
+run after the exec is committed, and LSM hooks only ever return 0.
+
+Already-running agents are adopted from `/proc` at startup, **after** the
+hooks attach, so nothing started during the walk falls between the two.
+Children forked during the walk are found by a follow-up re-scan, and for
+the startup window only the kernel also records out-of-scope forks/execs
+(a "startup journal", typically well under a second): descendants of
+adopted agents are linked through those records even when an intermediate
+process exited before the walk saw it (double fork), and their early
+fork/exec events are kept; every other journal record is discarded. The
+walk re-runs every 5s (and after config reloads) as a backstop, e.g. for
+`--attach-pid` and processes that rename themselves after exec.
 
 ### Reducing a capture
 

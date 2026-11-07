@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -105,6 +107,15 @@ func (f *File) WatchedPaths() []string {
 		if a.Match.Interpreter != "" {
 			out = append(out, a.Match.Interpreter)
 		}
+		// --attach-exe globs: watch the directory so a binary installed
+		// later is added to the kernel rules on reload. Only when the
+		// directory part is literal (inotify needs a real directory);
+		// otherwise the periodic /proc scan still covers new binaries.
+		if a.Match.K8SLabel == "__attach_exe__" && !hasGlobMeta(filepath.Dir(a.Match.Cgroup)) {
+			out = append(out, a.Match.Cgroup)
+		}
 	}
 	return out
 }
+
+func hasGlobMeta(s string) bool { return strings.ContainsAny(s, "*?[\\") }

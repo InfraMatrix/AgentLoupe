@@ -40,6 +40,10 @@ type Decoded struct {
 	Comm        string
 	Fields      map[string]any
 	Provisional bool
+	// Journal: EVENT_F_JOURNAL, an out-of-scope fork/exec recorded during
+	// the startup window (session 0). reconcileJournal relabels the ones
+	// that belong to adopted sessions; any left are dropped.
+	Journal bool
 }
 
 func cstr(b []byte) string {
@@ -84,13 +88,14 @@ func Decode(raw []byte) (*Decoded, error) {
 	}
 	size := int(binary.LittleEndian.Uint16(raw[2:4]))
 	version := binary.LittleEndian.Uint16(raw[4:6])
-	if version != 8 {
-		return nil, fmt.Errorf("abi version %d, want 8", version)
+	if version != 9 {
+		return nil, fmt.Errorf("abi version %d, want 9", version)
 	}
 	if size < 72 || size > len(raw) {
 		return nil, fmt.Errorf("bad record size %d (have %d)", size, len(raw))
 	}
 	d.Provisional = d.Flags&2 != 0
+	d.Journal = d.Flags&eventFJournal != 0
 	p := raw[72:size]
 	need := func(n int) bool { return len(p) >= n }
 
@@ -665,6 +670,10 @@ func (p *Processor) Process(d *Decoded) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
+	if d.Journal {
+		// Not relabeled by reconcileJournal: not an agent's activity.
+		return
+	}
 	if p.shouldDrop(d) {
 		p.droppedFiltered++
 		return

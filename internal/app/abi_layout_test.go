@@ -216,8 +216,8 @@ type agentRefMirror struct {
 	AgentName [32]byte
 }
 
-// agentloupe_config (ABI v6+: 32 bytes, fully used — slot 6 took the
-// tail pad for enable_net_send_events; slice 4 reuses slot 6, no change).
+// agentloupe_config (ABI v9: 40 bytes; v6-v8 were 32 — v9 added
+// enable_comm_rules and journal_untracked).
 // Pinned here because the loader writes it as raw bytes in
 // maps.go setConfig/setNetUDPOnly: a silent sizeof change on the C side
 // (e.g. struct tail padding after adding a field) breaks every loader
@@ -230,6 +230,13 @@ type agentloupeConfigMirror struct {
 	NetUDPOnly             uint32
 	EnableFileRWEvents     uint32
 	EnableNetSendEvents    uint32
+	EnableCommRules        uint32
+	JournalUntracked       uint32
+}
+
+// comm_key (ABI v9): maps.go commKey writes it as raw bytes.
+type commKeyMirror struct {
+	Name [commKeyLen]byte
 }
 
 func goStructSizes() map[string]uintptr {
@@ -254,6 +261,7 @@ func goStructSizes() map[string]uintptr {
 		"agent_ref":         unsafe.Sizeof(agentRefMirror{}),
 		"syscall_key":       unsafe.Sizeof(syscallKeyMirror{}),
 		"agentloupe_config": unsafe.Sizeof(agentloupeConfigMirror{}),
+		"comm_key":          unsafe.Sizeof(commKeyMirror{}),
 	}
 }
 
@@ -410,6 +418,10 @@ func TestStructOffsetsMatchDecoder(t *testing.T) {
 		{"agentloupe_config.net_udp_only (cfg[20:24])", unsafe.Offsetof(agentloupeConfigMirror{}.NetUDPOnly), 20},
 		{"agentloupe_config.enable_file_rw_events (cfg[24:28])", unsafe.Offsetof(agentloupeConfigMirror{}.EnableFileRWEvents), 24},
 		{"agentloupe_config.enable_net_send_events (cfg[28:32])", unsafe.Offsetof(agentloupeConfigMirror{}.EnableNetSendEvents), 28},
+		{"agentloupe_config.net_udp_only == cfgOffNetUDPOnly", unsafe.Offsetof(agentloupeConfigMirror{}.NetUDPOnly), cfgOffNetUDPOnly},
+		{"agentloupe_config.enable_comm_rules == cfgOffCommRules", unsafe.Offsetof(agentloupeConfigMirror{}.EnableCommRules), cfgOffCommRules},
+		{"agentloupe_config.journal_untracked == cfgOffJournalUntracked", unsafe.Offsetof(agentloupeConfigMirror{}.JournalUntracked), cfgOffJournalUntracked},
+		{"sizeof(agentloupe_config) == configSize", unsafe.Sizeof(agentloupeConfigMirror{}), configSize},
 	}
 	for _, tt := range tests {
 		if tt.got != tt.want {
@@ -453,9 +465,9 @@ func TestABIVersionMatchesHeader(t *testing.T) {
 	if m == nil {
 		t.Fatal("AGENTLOUPE_ABI_VERSION not found in bpf/agentloupe.h")
 	}
-	// Decode rejects anything but version 8 (see TestDecodeMalformed);
+	// Decode rejects anything but version 9 (see TestDecodeMalformed);
 	// if the header bumps the version, the decoder must move with it.
-	if string(m[1]) != "8" {
-		t.Errorf("AGENTLOUPE_ABI_VERSION = %s, but the Go decoder only accepts 8", m[1])
+	if string(m[1]) != "9" {
+		t.Errorf("AGENTLOUPE_ABI_VERSION = %s, but the Go decoder only accepts 9", m[1])
 	}
 }
