@@ -23,9 +23,22 @@
 #   6. stops the loader and renders scorecard, tool spans, and timeline.
 #
 # Needs: Linux >= 5.8 with BTF, go, clang, python3 >= 3.11, git, sudo,
-# network access (clone + pip), and an authenticated `claude` CLI.
+# network access (clone + pip), and coding-agent credentials (below).
 # The agent runs with --permission-mode acceptEdits and only the tools in
 # ALLOWED_TOOLS, inside the scratch clone.
+#
+# Credentials and model, settled before anything is built or run (details:
+# scripts/agent-session --help):
+#   coding agent (Claude Code)  AGENT_AUTH=<id> and AGENT_MODEL=<alias|id> for
+#                               this run, else the choice saved by
+#                               `scripts/agent-session pick`, else menus.
+#                               The script then shows the choice and asks
+#                               whether it is right; "no" prints how to set
+#                               the credentials you want. (No terminal:
+#                               AGENT_CONFIRM=1 is required.) Right before the
+#                               agent starts the credentials are re-checked.
+#   analysis model (AgentCutter, SAVE_CANNED=1 only)  META_MODEL_API_KEY;
+#                               never passed to the agent.
 #
 # Overrides: WORK (default /tmp/agentloupe-real-agent), MAX_RUNTIME (20m),
 # CLAUDE_BIN (claude), MAX_BUDGET_USD (5), FILE_RW=1 (also per-call
@@ -68,6 +81,20 @@ python3 -c 'import sys; sys.exit(sys.version_info < (3, 11))' || die "python3 >=
 if [ -n "${CLAUDECODE:-}" ]; then
   die "running inside a Claude Code session (CLAUDECODE is set): run from a plain terminal"
 fi
+
+say "Coding-agent credentials and model"
+# shellcheck source=../../scripts/agent-session
+. "$ROOT/scripts/agent-session"
+agent_auth_discover
+agent_session_choose run
+agent_auth_verify
+AS_CONFIRM_EXTRA=("limits       \$$MAX_BUDGET_USD budget, $MAX_RUNTIME max runtime"
+                  "workdir      $WORK (deleted and recreated)")
+if [ "${SAVE_CANNED:-0}" = "1" ]; then
+  AS_CONFIRM_EXTRA+=("analysis     AgentCutter: $([ -n "${META_MODEL_API_KEY:-}" ] && echo 'META_MODEL_API_KEY (not given to the agent)' || echo 'dry run, META_MODEL_API_KEY not set')")
+fi
+agent_session_confirm "make real-agent"
+
 sudo -v || die "sudo authentication failed"
 
 say "Building (as your user)"
@@ -78,6 +105,8 @@ go build -o loupe-scorecard ./cmd/loupe-scorecard
 say "Preparing NetworkX @ ${NX_COMMIT:0:12} in $WORK"
 rm -rf "$WORK"
 mkdir -p "$OUT"
+printf 'auth=%s\nmethod=%s\nmodel=%s\n' "$AA_ID" "$AA_METHOD" "$AS_MODEL" \
+  >"$OUT/agent-session.txt" # ids only, no secret
 git init -q "$WORK/networkx"
 git -C "$WORK/networkx" fetch -q --depth 1 "$NX_REPO" "$NX_COMMIT"
 git -C "$WORK/networkx" checkout -q FETCH_HEAD
@@ -132,11 +161,15 @@ done
 grep -q "running (dev mode" "$LOADER_LOG" || die "loader did not start (see $LOADER_LOG)"
 
 say "Running Claude Code (this takes a few minutes)"
+agent_auth_verify # still valid after the build (a login can lapse meanwhile)
+info "agent: $AA_ID, model $AS_MODEL"
 START=$(date +%s)
 set +e
 (
   cd "$WORK/networkx"
+  agent_auth_apply # only the chosen credential; no analysis key
   AGENTLOUPE_SPANS="$SPANS" "$CLAUDE_BIN" -p "$PROMPT" \
+    "${AS_MODEL_ARGS[@]}" \
     --permission-mode acceptEdits \
     --allowedTools "$ALLOWED_TOOLS" \
     --max-budget-usd "$MAX_BUDGET_USD" \
@@ -145,6 +178,22 @@ set +e
 CLAUDE_RC=$?
 set -e
 info "claude exited $CLAUDE_RC after $(( $(date +%s) - START ))s"
+python3 -I - "$OUT/claude-result.json" <<'PY' || true
+import json, sys
+try:
+    d = json.load(open(sys.argv[1]))
+except Exception:
+    sys.exit()
+used = sorted((d.get("modelUsage") or {}).keys())
+if used:
+    print("real-agent: models used:", ", ".join(used))
+if d.get("is_error"):
+    print("real-agent: claude reported an error:", str(d.get("result", ""))[:400])
+PY
+if [ "$CLAUDE_RC" -ne 0 ] && [ -s "$OUT/claude-stderr.log" ]; then
+  info "claude stderr (last lines; a model your plan lacks fails here):"
+  tail -5 "$OUT/claude-stderr.log" >&2
+fi
 sleep 3 # let exit/session_end events drain
 stop_loader
 trap - EXIT
