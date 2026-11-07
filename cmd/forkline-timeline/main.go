@@ -1,12 +1,12 @@
-// loupe-timeline turns an AgentLoupe JSONL capture into a per-session
+// forkline-timeline turns an Forkline JSONL capture into a per-session
 // timeline and breakdown: a swimlane of processes, file/network markers,
 // and syscall rate over time (from syscall_summary events).
 //
 // Usage:
 //
-//	loupe-timeline capture.jsonl                 # plain-text summary
-//	loupe-timeline --json capture.jsonl          # machine-readable JSON
-//	loupe-timeline --html out.html capture.jsonl # self-contained HTML
+//	forkline-timeline capture.jsonl                 # plain-text summary
+//	forkline-timeline --json capture.jsonl          # machine-readable JSON
+//	forkline-timeline --html out.html capture.jsonl # self-contained HTML
 //
 // Standard library only. The capture is streamed, never loaded whole.
 package main
@@ -331,7 +331,7 @@ type Options struct {
 	// basename, or argv[0] basename; earliest match per session) for
 	// harnesses that wrap the agent. Default: the session root.
 	AgentProcess string
-	// Hooks is a harness spans JSONL stream (hooks/agentloupe_hook.py).
+	// Hooks is a harness spans JSONL stream (hooks/forkline_hook.py).
 	Hooks     io.Reader
 	HooksName string
 }
@@ -1358,12 +1358,12 @@ func writeText(w io.Writer, rep *Report) {
 func main() {
 	htmlOut := flag.String("html", "", "write a self-contained HTML timeline to this file")
 	asJSON := flag.Bool("json", false, "write the breakdown as JSON to stdout")
-	spansPath := flag.String("spans", "", "harness tool-call spans JSONL (hooks/agentloupe_hook.py); default: <capture>.spans.jsonl if it exists")
+	spansPath := flag.String("spans", "", "harness tool-call spans JSONL (hooks/forkline_hook.py); default: <capture>.spans.jsonl if it exists")
 	agentProc := flag.String("agent-process", "", "process the tool spans hang off (comm / exec basename / argv[0] basename), for harnesses that wrap the agent; default: session root")
 	spansOnly := flag.Bool("tool-spans", false, "text mode: print only the per-session tool span table")
 	flag.Parse()
 	if flag.NArg() < 1 {
-		fmt.Fprintln(os.Stderr, "usage: loupe-timeline [--html out.html] [--json] [--tool-spans] [--spans spans.jsonl] [--agent-process NAME] capture.jsonl")
+		fmt.Fprintln(os.Stderr, "usage: forkline-timeline [--html out.html] [--json] [--tool-spans] [--spans spans.jsonl] [--agent-process NAME] capture.jsonl")
 		os.Exit(2)
 	}
 	f, err := os.Open(flag.Arg(0))
@@ -1407,7 +1407,7 @@ func main() {
 			os.Exit(1)
 		}
 		hf.Close()
-		fmt.Fprintf(os.Stderr, "loupe-timeline: wrote %s\n", *htmlOut)
+		fmt.Fprintf(os.Stderr, "forkline-timeline: wrote %s\n", *htmlOut)
 	}
 	if *asJSON {
 		enc := json.NewEncoder(os.Stdout)

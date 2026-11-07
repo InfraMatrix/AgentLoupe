@@ -1,12 +1,12 @@
 /* SPDX-License-Identifier: (MIT OR GPL-2.0) */
 /*
  * scope.h — scoping, session lifecycle, event emission and path resolution.
- * Included once by agentloupe.bpf.c (single translation unit).
+ * Included once by forkline.bpf.c (single translation unit).
  *
  * Requires: vmlinux.h, <bpf/bpf_helpers.h>, <bpf/bpf_core_read.h>,
- *           <bpf/bpf_tracing.h>, agentloupe.h.
+ *           <bpf/bpf_tracing.h>, forkline.h.
  *
- * Path resolution strategy (see agentloupe.h):
+ * Path resolution strategy (see forkline.h):
  *   - path_via_dpath():  bpf_d_path, LSM programs ONLY. The helper is
  *     allowlisted per program type/function; calling it from a tracepoint
  *     program would make that program fail to load, so the two variants are
@@ -19,8 +19,8 @@
  *     mount prefix. That is why PATH_SRC_DENTRY_WALK exists: downstream
  *     consumers can see the path is best-effort, never silently exact.
  */
-#ifndef AGENTLOUPE_SCOPE_H
-#define AGENTLOUPE_SCOPE_H
+#ifndef FORKLINE_SCOPE_H
+#define FORKLINE_SCOPE_H
 
 /* Pseudo-filesystem superblock magics skipped for file_infos creation. */
 #define AL_PROC_SUPER_MAGIC    0x9fa0ULL
@@ -63,7 +63,7 @@ static __always_inline void bump_stat(__u32 type, bool dropped)
 		__sync_fetch_and_add(&c->emitted, 1);
 }
 
-static __always_inline struct agentloupe_counters *counters_ptr(void)
+static __always_inline struct forkline_counters *counters_ptr(void)
 {
 	__u32 zero = 0;
 	return bpf_map_lookup_elem(&counters, &zero);
@@ -71,7 +71,7 @@ static __always_inline struct agentloupe_counters *counters_ptr(void)
 
 static __always_inline bool cfg_enabled(__u32 which)
 {
-	struct agentloupe_config *cfg;
+	struct forkline_config *cfg;
 	__u32 zero = 0;
 
 	cfg = bpf_map_lookup_elem(&config_map, &zero);
@@ -135,7 +135,7 @@ static __always_inline __u64 alloc_session_id(void)
 	__u64 *next = bpf_map_lookup_elem(&session_counter, &zero);
 
 	if (!next) {
-		struct agentloupe_counters *c = counters_ptr();
+		struct forkline_counters *c = counters_ptr();
 		if (c)
 			__sync_fetch_and_add(&c->session_allocs_failed, 1);
 		return 0;
@@ -232,7 +232,7 @@ create_session(__u32 tgid, const struct create_session_args *a)
 {
 	struct session_info info = {};
 	struct tracked_session tr = {};
-	struct agentloupe_counters *c;
+	struct forkline_counters *c;
 	/* Hoist a->task into a task_struct-typed local BEFORE any CO-RE
 	 * access: a CO-RE relocation rooted at `a` would reference our
 	 * program-local create_session_args type, which does not exist in
@@ -325,7 +325,7 @@ fill_hdr(struct event_hdr *hdr, __u32 type, __u32 total_len, __u64 sid,
 		((volatile char *)hdr)[i] = 0;
 	hdr->type = (__u16)type;
 	hdr->size = (__u16)total_len;
-	hdr->version = AGENTLOUPE_ABI_VERSION;
+	hdr->version = FORKLINE_ABI_VERSION;
 	hdr->ts_ns = bpf_ktime_get_ns();
 	hdr->session_id = sid;
 	if (info) {
@@ -627,4 +627,4 @@ static __noinline void read_argv(struct task_struct *task, struct linux_binprm *
 	}
 }
 
-#endif /* AGENTLOUPE_SCOPE_H */
+#endif /* FORKLINE_SCOPE_H */

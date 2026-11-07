@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: (MIT OR GPL-2.0) */
 /*
- * agentloupe.bpf.c — AgentLoupe MVP probes (single translation unit).
+ * forkline.bpf.c — Forkline MVP probes (single translation unit).
  *
  * OBSERVE ONLY. Every LSM hook in this file returns 0 unconditionally on
  * every path: a non-zero return from a BPF LSM hook DENIES the operation.
@@ -22,7 +22,7 @@
 #include <bpf/bpf_tracing.h>
 #include <bpf/bpf_endian.h>
 
-#include "agentloupe.h"
+#include "forkline.h"
 #include "scope.h"
 
 /* AF_* are macros in kernel headers, not BTF, so vmlinux.h does not
@@ -134,7 +134,7 @@ exec_core(struct task_struct *task, struct linux_binprm *bprm,
 	if (inode) {
 		struct binary_id key = {};
 		struct agent_ref *bin_ref;
-		struct agentloupe_counters *dc;
+		struct forkline_counters *dc;
 
 		key.ino = BPF_CORE_READ(inode, i_ino);
 		key.dev = BPF_CORE_READ(inode, i_sb, s_dev);
@@ -189,7 +189,7 @@ exec_core(struct task_struct *task, struct linux_binprm *bprm,
 		if (dc)
 			__sync_fetch_and_add(&dc->exec_binary_miss, 1);
 	} else {
-		struct agentloupe_counters *dc = counters_ptr();
+		struct forkline_counters *dc = counters_ptr();
 
 		if (dc)
 			__sync_fetch_and_add(&dc->exec_no_file, 1);
@@ -218,7 +218,7 @@ exec_core(struct task_struct *task, struct linux_binprm *bprm,
 	if (!have_session) {
 		/* Last chance: cgroup-matched service exec'ing something. */
 		if (!resolve_scope(tgid, task, &sid, &info, &cgid)) {
-			struct agentloupe_counters *c = counters_ptr();
+			struct forkline_counters *c = counters_ptr();
 
 			if (c)
 				__sync_fetch_and_add(&c->exec_out_of_scope, 1);
@@ -275,7 +275,7 @@ int BPF_PROG(handle_bprm_committed_creds, struct linux_binprm *bprm)
 	struct ev_exec *ev;
 	struct file *file = NULL;
 	bool partial = false;
-	struct agentloupe_counters *c = counters_ptr();
+	struct forkline_counters *c = counters_ptr();
 
 	if (c)
 		__sync_fetch_and_add(&c->exec_hook_runs, 1);
@@ -326,7 +326,7 @@ int handle_exec_tp(struct exec_raw_args *ctx)
 	struct file *file = NULL;
 	struct dentry *pwd_dentry;
 	bool partial = false;
-	struct agentloupe_counters *c = counters_ptr();
+	struct forkline_counters *c = counters_ptr();
 
 	if (c)
 		__sync_fetch_and_add(&c->exec_hook_runs, 1);
@@ -402,7 +402,7 @@ int handle_fork(struct fork_raw_args *ctx)
 	 * provisional subtree stops growing at this hook. */
 	tr.session_id = sid;
 	if (bpf_map_update_elem(&tracked_sessions, &ctgid, &tr, BPF_ANY) < 0) {
-		struct agentloupe_counters *c = counters_ptr();
+		struct forkline_counters *c = counters_ptr();
 		if (c)
 			__sync_fetch_and_add(&c->tracked_updates_failed, 1);
 		return 0;
@@ -533,7 +533,7 @@ file_info_create(__u64 file_ptr, struct file *f, __u64 sid, __u32 tgid,
 	}
 	info = bpf_map_lookup_elem(&file_infos, &file_ptr);
 	if (!info) {
-		struct agentloupe_counters *c = counters_ptr();
+		struct forkline_counters *c = counters_ptr();
 		if (c)
 			__sync_fetch_and_add(&c->file_info_updates_failed, 1);
 		return NULL;
@@ -732,7 +732,7 @@ pending_begin(__u32 op, const char *user_path, const char *user_path2, __u32 fla
 	struct session_info info = {};
 	__u64 key = bpf_get_current_pid_tgid();
 	__u64 sid = 0, cgid = 0;
-	struct agentloupe_counters *ec = counters_ptr();
+	struct forkline_counters *ec = counters_ptr();
 
 	if (ec)
 		__sync_fetch_and_add(&ec->file_pending_stored, 1);
@@ -817,7 +817,7 @@ static __always_inline int pending_finish(long ret, __u32 op)
 		return 0;
 	op = p->op; /* raw_tp sys_exit does not say which syscall: use stored */
 	{
-		struct agentloupe_counters *c = counters_ptr();
+		struct forkline_counters *c = counters_ptr();
 
 		if (c)
 			__sync_fetch_and_add(&c->file_pending_matched, 1);
@@ -1344,7 +1344,7 @@ int handle_enter_connect(struct sys_enter_ctx *ctx)
  * userspace pointers: the direct buf for sendto, iov[0] of the user
  * msghdr for sendmsg, and the first datagram's msghdr for sendmmsg
  * (batched datagrams past the first share its hostname — documented in
- * the map comment in agentloupe.h). send() is libc sugar over sendto,
+ * the map comment in forkline.h). send() is libc sugar over sendto,
  * so syscalls 44/46/307 cover every send path on x86_64.
  *
  * The parse result is stashed in snd_hostnames keyed on pid_tgid and
@@ -1956,7 +1956,7 @@ int handle_sys_enter_count(struct sys_enter_raw_args *ctx)
 		__u64 one = 1;
 
 		if (bpf_map_update_elem(&syscall_counts, &key, &one, BPF_NOEXIST) < 0) {
-			struct agentloupe_counters *c = counters_ptr();
+			struct forkline_counters *c = counters_ptr();
 			if (c)
 				__sync_fetch_and_add(&c->syscall_updates_failed, 1);
 		}

@@ -1,5 +1,5 @@
 // Harness spans: correlate tool-call records written by a harness hook
-// (hooks/agentloupe_hook.py, Claude Code PreToolUse/PostToolUse) with the
+// (hooks/forkline_hook.py, Claude Code PreToolUse/PostToolUse) with the
 // process-tree spans built from kernel events.
 //
 // Clock alignment. Kernel event `ts` = wall_base + CLOCK_MONOTONIC
@@ -27,7 +27,7 @@ import (
 	"time"
 )
 
-const hookScriptMarker = "agentloupe_hook"
+const hookScriptMarker = "forkline_hook"
 
 type hookRec struct {
 	Event       string         `json:"event"`
@@ -313,7 +313,7 @@ func (b *builder) correlate(recs []*hookRec, sessions []*sessionBuilder) *Harnes
 			}
 			if sp.Role == "hook" {
 				info.HookSpans++
-				sp.Notes = append(sp.Notes, "AgentLoupe hook process: observation overhead, not agent work")
+				sp.Notes = append(sp.Notes, "Forkline hook process: observation overhead, not agent work")
 			}
 		}
 	}

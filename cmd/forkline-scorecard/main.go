@@ -1,4 +1,4 @@
-// loupe-scorecard reduces a Loupe JSONL capture to a per-session
+// forkline-scorecard reduces a Forkline JSONL capture to a per-session
 // performance scorecard: duration, exec/fork/exit counts, file activity,
 // bytes moved, network connects, and session CPU (when present).
 package main
@@ -286,7 +286,7 @@ func main() {
 	asJSON := flag.Bool("json", false, "machine-readable output")
 	flag.Parse()
 	if flag.NArg() < 1 {
-		fmt.Fprintln(os.Stderr, "usage: loupe-scorecard [--json] capture.jsonl")
+		fmt.Fprintln(os.Stderr, "usage: forkline-scorecard [--json] capture.jsonl")
 		os.Exit(2)
 	}
 	f, err := os.Open(flag.Arg(0))

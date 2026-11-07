@@ -31,7 +31,7 @@ import (
 // journal records are discarded. Nothing blocks: the kernel side only
 // writes ring-buffer records, which it drops (and counts) when full.
 
-// eventFJournal mirrors EVENT_F_JOURNAL in bpf/agentloupe.h.
+// eventFJournal mirrors EVENT_F_JOURNAL in bpf/forkline.h.
 const eventFJournal = 1 << 5
 
 // journalPump drains the ring buffer into memory during the startup

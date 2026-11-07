@@ -35,7 +35,7 @@
             "--allowedTools",
             "Bash"
           ],
-          "cwd": "/agentloupe-real-agent/networkx",
+          "cwd": "/forkline-real-agent/networkx",
           "start": "2026-11-05T21:42:43.862278536Z",
           "end": "2026-11-05T21:43:43.343027041Z",
           "start_ms": 0,
@@ -66,7 +66,7 @@
             "--",
             ":(icase).claude/settings.local.json"
           ],
-          "cwd": "/agentloupe-real-agent/networkx",
+          "cwd": "/forkline-real-agent/networkx",
           "start": "2026-11-05T21:42:43.9583646Z",
           "end": "2026-11-05T21:42:43.959740986Z",
           "start_ms": 96,
@@ -117,7 +117,7 @@
             "-c",
             "hook.prepare-commit"
           ],
-          "cwd": "/agentloupe-real-agent/networkx",
+          "cwd": "/forkline-real-agent/networkx",
           "start": "2026-11-05T21:42:43.96544681Z",
           "end": "2026-11-05T21:42:43.966770106Z",
           "start_ms": 103,
@@ -167,7 +167,7 @@
             "-c",
             "hook.prepare-commit"
           ],
-          "cwd": "/agentloupe-real-agent/networkx",
+          "cwd": "/forkline-real-agent/networkx",
           "start": "2026-11-05T21:42:43.990008677Z",
           "end": "2026-11-05T21:42:43.991439846Z",
           "start_ms": 127,
@@ -189,7 +189,7 @@
             "-c",
             "ps -o command= -p 21490"
           ],
-          "cwd": "/agentloupe-real-agent/networkx",
+          "cwd": "/forkline-real-agent/networkx",
           "start": "2026-11-05T21:42:44.001231299Z",
           "end": "2026-11-05T21:42:44.011549244Z",
           "start_ms": 138,
@@ -213,7 +213,7 @@
             "-p",
             "21490"
           ],
-          "cwd": "/agentloupe-real-agent/networkx",
+          "cwd": "/forkline-real-agent/networkx",
           "start": "2026-11-05T21:42:44.001926942Z",
           "end": "2026-11-05T21:42:44.011353109Z",
           "start_ms": 139,
@@ -266,7 +266,7 @@
             "-c",
             "hook.pre-me"
           ],
-          "cwd": "/agentloupe-real-agent/networkx",
+          "cwd": "/forkline-real-agent/networkx",
           "start": "2026-11-05T21:42:44.013519727Z",
           "end": "2026-11-05T21:42:44.038611314Z",
           "start_ms": 151,
@@ -319,7 +319,7 @@
             "-c",
             "hook.pre-me"
           ],
-          "cwd": "/agentloupe-real-agent/networkx",
+          "cwd": "/forkline-real-agent/networkx",
           "start": "2026-11-05T21:42:44.014231648Z",
           "end": "2026-11-05T21:42:44.015745739Z",
           "start_ms": 151,
@@ -371,7 +371,7 @@
             "-c",
             "hook.pre-me"
           ],
-          "cwd": "/agentloupe-real-agent/networkx",
+          "cwd": "/forkline-real-agent/networkx",
           "start": "2026-11-05T21:42:44.01466926Z",
           "end": "2026-11-05T21:42:44.015685325Z",
           "start_ms": 152,
@@ -406,7 +406,7 @@
             "-c",
             "uname -s\nuname -r\nuname -m\nfor c in npm yarn pnpm; do command -v \"$c\" \u003e/dev/null 2\u003e\u00261 \u0026\u0026 printf \"%s,\" \"$c\"; done; echo\nfor c in bun deno node; do command -v \"$c\" \u003e/dev/null 2\u003e\u00261 \u0026\u0026 printf \"%s,\" \"$c\"; done; echo"
           ],
-          "cwd": "/agentloupe-real-agent/networkx",
+          "cwd": "/forkline-real-agent/networkx",
           "start": "2026-11-05T21:42:44.110300878Z",
           "end": "2026-11-05T21:42:44.116724794Z",
           "start_ms": 248,
@@ -427,7 +427,7 @@
             "uname",
             "-s"
           ],
-          "cwd": "/agentloupe-real-agent/networkx",
+          "cwd": "/forkline-real-agent/networkx",
           "start": "2026-11-05T21:42:44.111026768Z",
           "end": "2026-11-05T21:42:44.113020267Z",
           "start_ms": 248,
@@ -448,7 +448,7 @@
             "uname",
             "-r"
           ],
-          "cwd": "/agentloupe-real-agent/networkx",
+          "cwd": "/forkline-real-agent/networkx",
           "start": "2026-11-05T21:42:44.113208506Z",
           "end": "2026-11-05T21:42:44.114724897Z",
           "start_ms": 250,
@@ -469,7 +469,7 @@
             "uname",
             "-m"
           ],
-          "cwd": "/agentloupe-real-agent/networkx",
+          "cwd": "/forkline-real-agent/networkx",
           "start": "2026-11-05T21:42:44.114886272Z",
           "end": "2026-11-05T21:42:44.116368243Z",
           "start_ms": 252,
@@ -489,9 +489,9 @@
           "argv": [
             "/bin/sh",
             "-c",
-            "python3 /u/demo/dev-inframatrix/AgentLoupe/hooks/agentloupe_hook.py"
+            "python3 /u/demo/dev-inframatrix/forkline/hooks/forkline_hook.py"
           ],
-          "cwd": "/agentloupe-real-agent/networkx",
+          "cwd": "/forkline-real-agent/networkx",
           "start": "2026-11-05T21:42:46.962295397Z",
           "end": "2026-11-05T21:42:46.981741555Z",
           "start_ms": 3100,
@@ -510,9 +510,9 @@
           "filename": "/usr/bin/python3.14",
           "argv": [
             "python3",
-            "/u/demo/dev-inframatrix/AgentLoupe/hooks/agentloupe_hook.py"
+            "/u/demo/dev-inframatrix/forkline/hooks/forkline_hook.py"
           ],
-          "cwd": "/agentloupe-real-agent/networkx",
+          "cwd": "/forkline-real-agent/networkx",
           "start": "2026-11-05T21:42:46.963251072Z",
           "end": "2026-11-05T21:42:46.981400639Z",
           "start_ms": 3100,
@@ -533,7 +533,7 @@
           "argv": [
             "env"
           ],
-          "cwd": "/agentloupe-real-agent/networkx",
+          "cwd": "/forkline-real-agent/networkx",
           "start": "2026-11-05T21:42:46.99435618Z",
           "end": "2026-11-05T21:42:46.997800648Z",
           "start_ms": 3132,
@@ -556,7 +556,7 @@
             "-l",
             "SNAPSHOT_FILE=/u/demo/.claude/shell-snapshots/snapshot-zsh-1793914966995-amtwmb.sh\n      source \"/u/demo/.zshrc\" \u003c /dev/null\n      \n\n      # First, create/clear the snapshot file\n      echo \"# Snapshot file\" \u003e| \"$SNAPSHOT_FILE\"\n\n      # When this file is sourced, we first unalias to avoid conflicts\n      # This is necessary because aliases get \"frozen\" inside function definitions at definition time,\n      # which can cause unexpected behavior when functions use commands "
           ],
-          "cwd": "/agentloupe-real-agent/networkx",
+          "cwd": "/forkline-real-agent/networkx",
           "start": "2026-11-05T21:42:46.995638601Z",
           "end": "2026-11-05T21:42:47.064802022Z",
           "start_ms": 3133,
@@ -607,7 +607,7 @@
             "git",
             "version"
           ],
-          "cwd": "/agentloupe-real-agent/networkx",
+          "cwd": "/forkline-real-agent/networkx",
           "start": "2026-11-05T21:42:47.023362575Z",
           "end": "2026-11-05T21:42:47.024491578Z",
           "start_ms": 3161,
@@ -643,7 +643,7 @@
             "docker",
             "--version"
           ],
-          "cwd": "/agentloupe-real-agent/networkx",
+          "cwd": "/forkline-real-agent/networkx",
           "start": "2026-11-05T21:42:47.027449798Z",
           "end": "2026-11-05T21:42:47.039498485Z",
           "start_ms": 3165,
@@ -666,7 +666,7 @@
             "completion",
             "zsh"
           ],
-          "cwd": "/agentloupe-real-agent/networkx",
+          "cwd": "/forkline-real-agent/networkx",
           "start": "2026-11-05T21:42:47.040000031Z",
           "end": "2026-11-05T21:42:47.052648289Z",
           "start_ms": 3177,
@@ -731,7 +731,7 @@
             "ssh-agent",
             "-s"
           ],
-          "cwd": "/agentloupe-real-agent/networkx",
+          "cwd": "/forkline-real-agent/networkx",
           "start": "2026-11-05T21:42:47.042464219Z",
           "end": "2026-11-05T21:42:47.045784589Z",
           "start_ms": 3180,
@@ -765,7 +765,7 @@
             "ssh-add",
             "/u/demo/.ssh/id_local"
           ],
-          "cwd": "/agentloupe-real-agent/networkx",
+          "cwd": "/forkline-real-agent/networkx",
           "start": "2026-11-05T21:42:47.0461434Z",
           "end": "2026-11-05T21:42:47.048976065Z",
           "start_ms": 3183,
@@ -817,7 +817,7 @@
             "-vE",
             "^_[^_]"
           ],
-          "cwd": "/agentloupe-real-agent/networkx",
+          "cwd": "/forkline-real-agent/networkx",
           "start": "2026-11-05T21:42:47.051816279Z",
           "end": "2026-11-05T21:42:47.053200508Z",
           "start_ms": 3189,
@@ -852,7 +852,7 @@
             "sed",
             "s/^/setopt /"
           ],
-          "cwd": "/agentloupe-real-agent/networkx",
+          "cwd": "/forkline-real-agent/networkx",
           "start": "2026-11-05T21:42:47.057204032Z",
           "end": "2026-11-05T21:42:47.058225377Z",
           "start_ms": 3194,
@@ -874,7 +874,7 @@
             "-n",
             "1000"
           ],
-          "cwd": "/agentloupe-real-agent/networkx",
+          "cwd": "/forkline-real-agent/networkx",
           "start": "2026-11-05T21:42:47.057471514Z",
           "end": "2026-11-05T21:42:47.059680625Z",
           "start_ms": 3195,
@@ -915,7 +915,7 @@
             "-e",
             "s/^/alias -- /"
           ],
-          "cwd": "/agentloupe-real-agent/networkx",
+          "cwd": "/forkline-real-agent/networkx",
           "start": "2026-11-05T21:42:47.060183381Z",
           "end": "2026-11-05T21:42:47.061254032Z",
           "start_ms": 3197,
@@ -935,7 +935,7 @@
           "argv": [
             "cat"
           ],
-          "cwd": "/agentloupe-real-agent/networkx",
+          "cwd": "/forkline-real-agent/networkx",
           "start": "2026-11-05T21:42:47.061516875Z",
           "end": "2026-11-05T21:42:47.064493729Z",
           "start_ms": 3199,
@@ -958,7 +958,7 @@
             "-c",
             "source /u/demo/.claude/shell-snapshots/snapshot-zsh-1793914966995-amtwmb.sh 2\u003e/dev/null || true \u0026\u0026 setopt NO_EXTENDED_GLOB NO_BARE_GLOB_QUAL 2\u003e/dev/null || true \u0026\u0026 { \\builtin unalias -- 'which'; \\builtin unset -f -- 'which'; } \u003e/dev/null 2\u003e\u00261 || true \u0026\u0026 { \\builtin unalias -- 'unsetenv'; \\builtin unset -f -- 'unsetenv'; } \u003e/dev/null 2\u003e\u00261 || true \u0026\u0026 eval 'git diff \u0026\u0026 python3 -m venv .venv \u0026\u0026 .venv/bin/pip install -q -e . pytest 2\u003e\u00261 | tail -3' \u003c /dev/null \u0026\u0026 pwd -P \u003e| /tmp/claude-edb"
           ],
-          "cwd": "/agentloupe-real-agent/networkx",
+          "cwd": "/forkline-real-agent/networkx",
           "start": "2026-11-05T21:42:47.068300954Z",
           "end": "2026-11-05T21:42:50.017164586Z",
           "start_ms": 3206,
@@ -980,7 +980,7 @@
             "git",
             "diff"
           ],
-          "cwd": "/agentloupe-real-agent/networkx",
+          "cwd": "/forkline-real-agent/networkx",
           "start": "2026-11-05T21:42:47.075698781Z",
           "end": "2026-11-05T21:42:47.100728667Z",
           "start_ms": 3213,
@@ -1004,7 +1004,7 @@
             "venv",
             ".venv"
           ],
-          "cwd": "/agentloupe-real-agent/networkx",
+          "cwd": "/forkline-real-agent/networkx",
           "start": "2026-11-05T21:42:47.101122779Z",
           "end": "2026-11-05T21:42:48.313493301Z",
           "start_ms": 3238,
@@ -1029,7 +1029,7 @@
             "--upgrade",
             "--default-pip"
           ],
-          "cwd": "/agentloupe-real-agent/networkx/.venv",
+          "cwd": "/forkline-real-agent/networkx/.venv",
           "start": "2026-11-05T21:42:47.130185424Z",
           "end": "2026-11-05T21:42:48.307476909Z",
           "start_ms": 3267,
@@ -1054,7 +1054,7 @@
             "-c",
             "\nimport runpy\nimport sys\nsys.path = ['/tmp/tmpz5dn37pl/pip-25.1.1-py3-none-any.whl'] + sys.path\nsys.argv[1:] = ['install', '--no-cache-dir', '--no-index', '--find-links', '/tmp/tmpz5dn37pl', '--upgrade', 'pip']\nrunpy.run_module(\"pip\", run_name=\"__main__\", alter_sys=True)\n"
           ],
-          "cwd": "/agentloupe-real-agent/networkx/.venv",
+          "cwd": "/forkline-real-agent/networkx/.venv",
           "start": "2026-11-05T21:42:47.157465373Z",
           "end": "2026-11-05T21:42:48.300937883Z",
           "start_ms": 3295,
@@ -1077,7 +1077,7 @@
             "/usr/bin/lsb_release",
             "-a"
           ],
-          "cwd": "/agentloupe-real-agent/networkx/.venv",
+          "cwd": "/forkline-real-agent/networkx/.venv",
           "start": "2026-11-05T21:42:47.768789192Z",
           "end": "2026-11-05T21:42:47.780661409Z",
           "start_ms": 3906,
@@ -1105,7 +1105,7 @@
             "--",
             "-a"
           ],
-          "cwd": "/agentloupe-real-agent/networkx/.venv",
+          "cwd": "/forkline-real-agent/networkx/.venv",
           "start": "2026-11-05T21:42:47.769729417Z",
           "end": "2026-11-05T21:42:47.770693969Z",
           "start_ms": 3907,
@@ -1154,7 +1154,7 @@
             "cut",
             "-c1"
           ],
-          "cwd": "/agentloupe-real-agent/networkx/.venv",
+          "cwd": "/forkline-real-agent/networkx/.venv",
           "start": "2026-11-05T21:42:47.771243996Z",
           "end": "2026-11-05T21:42:47.773302409Z",
           "start_ms": 3908,
@@ -1177,7 +1177,7 @@
             "[:lower:]",
             "[:upper:]"
           ],
-          "cwd": "/agentloupe-real-agent/networkx/.venv",
+          "cwd": "/forkline-real-agent/networkx/.venv",
           "start": "2026-11-05T21:42:47.771327139Z",
           "end": "2026-11-05T21:42:47.773465926Z",
           "start_ms": 3909,
@@ -1226,7 +1226,7 @@
             "cut",
             "-c2-"
           ],
-          "cwd": "/agentloupe-real-agent/networkx/.venv",
+          "cwd": "/forkline-real-agent/networkx/.venv",
           "start": "2026-11-05T21:42:47.774087565Z",
           "end": "2026-11-05T21:42:47.775850201Z",
           "start_ms": 3911,
@@ -1276,7 +1276,7 @@
             "[:upper:]",
             "[:lower:]"
           ],
-          "cwd": "/agentloupe-real-agent/networkx/.venv",
+          "cwd": "/forkline-real-agent/networkx/.venv",
           "start": "2026-11-05T21:42:47.776429169Z",
           "end": "2026-11-05T21:42:47.778184888Z",
           "start_ms": 3914,
@@ -1328,7 +1328,7 @@
             "[:upper:]",
             "[:lower:]"
           ],
-          "cwd": "/agentloupe-real-agent/networkx/.venv",
+          "cwd": "/forkline-real-agent/networkx/.venv",
           "start": "2026-11-05T21:42:47.778712459Z",
           "end": "2026-11-05T21:42:47.780294526Z",
           "start_ms": 3916,
@@ -1349,7 +1349,7 @@
             "uname",
             "-rs"
           ],
-          "cwd": "/agentloupe-real-agent/networkx/.venv",
+          "cwd": "/forkline-real-agent/networkx/.venv",
           "start": "2026-11-05T21:42:47.781380013Z",
           "end": "2026-11-05T21:42:47.782963301Z",
           "start_ms": 3919,
@@ -1376,7 +1376,7 @@
             ".",
             "pytest"
           ],
-          "cwd": "/agentloupe-real-agent/networkx",
+          "cwd": "/forkline-real-agent/networkx",
           "start": "2026-11-05T21:42:48.314098708Z",
           "end": "2026-11-05T21:42:50.015338537Z",
           "start_ms": 4451,
@@ -1399,7 +1399,7 @@
             "/usr/bin/lsb_release",
             "-a"
           ],
-          "cwd": "/agentloupe-real-agent/networkx",
+          "cwd": "/forkline-real-agent/networkx",
           "start": "2026-11-05T21:42:48.435724949Z",
           "end": "2026-11-05T21:42:48.44694061Z",
           "start_ms": 4573,
@@ -1427,7 +1427,7 @@
             "--",
             "-a"
           ],
-          "cwd": "/agentloupe-real-agent/networkx",
+          "cwd": "/forkline-real-agent/networkx",
           "start": "2026-11-05T21:42:48.436652809Z",
           "end": "2026-11-05T21:42:48.437451022Z",
           "start_ms": 4574,
@@ -1475,7 +1475,7 @@
             "cut",
             "-c1"
           ],
-          "cwd": "/agentloupe-real-agent/networkx",
+          "cwd": "/forkline-real-agent/networkx",
           "start": "2026-11-05T21:42:48.438071841Z",
           "end": "2026-11-05T21:42:48.440090694Z",
           "start_ms": 4575,
@@ -1497,7 +1497,7 @@
             "[:lower:]",
             "[:upper:]"
           ],
-          "cwd": "/agentloupe-real-agent/networkx",
+          "cwd": "/forkline-real-agent/networkx",
           "start": "2026-11-05T21:42:48.43815068Z",
           "end": "2026-11-05T21:42:48.440281027Z",
           "start_ms": 4575,
@@ -1546,7 +1546,7 @@
             "cut",
             "-c2-"
           ],
-          "cwd": "/agentloupe-real-agent/networkx",
+          "cwd": "/forkline-real-agent/networkx",
           "start": "2026-11-05T21:42:48.440739528Z",
           "end": "2026-11-05T21:42:48.442495054Z",
           "start_ms": 4578,
@@ -1596,7 +1596,7 @@
             "[:upper:]",
             "[:lower:]"
           ],
-          "cwd": "/agentloupe-real-agent/networkx",
+          "cwd": "/forkline-real-agent/networkx",
           "start": "2026-11-05T21:42:48.443071832Z",
           "end": "2026-11-05T21:42:48.444354305Z",
           "start_ms": 4580,
@@ -1646,7 +1646,7 @@
             "[:upper:]",
             "[:lower:]"
           ],
-          "cwd": "/agentloupe-real-agent/networkx",
+          "cwd": "/forkline-real-agent/networkx",
           "start": "2026-11-05T21:42:48.444961732Z",
           "end": "2026-11-05T21:42:48.446631817Z",
           "start_ms": 4582,
@@ -1668,7 +1668,7 @@
             "uname",
             "-rs"
           ],
-          "cwd": "/agentloupe-real-agent/networkx",
+          "cwd": "/forkline-real-agent/networkx",
           "start": "2026-11-05T21:42:48.448226445Z",
           "end": "2026-11-05T21:42:48.449477417Z",
           "start_ms": 4585,
@@ -1698,7 +1698,7 @@
             "--no-compile",
             "--target"
           ],
-          "cwd": "/agentloupe-real-agent/networkx",
+          "cwd": "/forkline-real-agent/networkx",
           "start": "2026-11-05T21:42:48.459307805Z",
           "end": "2026-11-05T21:42:48.736583635Z",
           "start_ms": 4597,
@@ -1721,7 +1721,7 @@
             "/usr/bin/lsb_release",
             "-a"
           ],
-          "cwd": "/agentloupe-real-agent/networkx",
+          "cwd": "/forkline-real-agent/networkx",
           "start": "2026-11-05T21:42:48.580686308Z",
           "end": "2026-11-05T21:42:48.59220316Z",
           "start_ms": 4718,
@@ -1750,7 +1750,7 @@
             "--",
             "-a"
           ],
-          "cwd": "/agentloupe-real-agent/networkx",
+          "cwd": "/forkline-real-agent/networkx",
           "start": "2026-11-05T21:42:48.581534566Z",
           "end": "2026-11-05T21:42:48.582430246Z",
           "start_ms": 4719,
@@ -1798,7 +1798,7 @@
             "cut",
             "-c1"
           ],
-          "cwd": "/agentloupe-real-agent/networkx",
+          "cwd": "/forkline-real-agent/networkx",
           "start": "2026-11-05T21:42:48.582956303Z",
           "end": "2026-11-05T21:42:48.584460078Z",
           "start_ms": 4720,
@@ -1820,7 +1820,7 @@
             "[:lower:]",
             "[:upper:]"
           ],
-          "cwd": "/agentloupe-real-agent/networkx",
+          "cwd": "/forkline-real-agent/networkx",
           "start": "2026-11-05T21:42:48.583035649Z",
           "end": "2026-11-05T21:42:48.584969135Z",
           "start_ms": 4720,
@@ -1871,7 +1871,7 @@
             "cut",
             "-c2-"
           ],
-          "cwd": "/agentloupe-real-agent/networkx",
+          "cwd": "/forkline-real-agent/networkx",
           "start": "2026-11-05T21:42:48.585558133Z",
           "end": "2026-11-05T21:42:48.587283673Z",
           "start_ms": 4723,
@@ -1921,7 +1921,7 @@
             "[:upper:]",
             "[:lower:]"
           ],
-          "cwd": "/agentloupe-real-agent/networkx",
+          "cwd": "/forkline-real-agent/networkx",
           "start": "2026-11-05T21:42:48.587907585Z",
           "end": "2026-11-05T21:42:48.589626902Z",
           "start_ms": 4725,
@@ -1971,7 +1971,7 @@
             "[:upper:]",
             "[:lower:]"
           ],
-          "cwd": "/agentloupe-real-agent/networkx",
+          "cwd": "/forkline-real-agent/networkx",
           "start": "2026-11-05T21:42:48.590203632Z",
           "end": "2026-11-05T21:42:48.59193908Z",
           "start_ms": 4727,
@@ -1993,7 +1993,7 @@
             "uname",
             "-rs"
           ],
-          "cwd": "/agentloupe-real-agent/networkx",
+          "cwd": "/forkline-real-agent/networkx",
           "start": "2026-11-05T21:42:48.593456021Z",
           "end": "2026-11-05T21:42:48.595190485Z",
           "start_ms": 4731,
@@ -2016,7 +2016,7 @@
             "_supported_features",
             "/tmp/tmpdmpxm9j8"
           ],
-          "cwd": "/agentloupe-real-agent/networkx",
+          "cwd": "/forkline-real-agent/networkx",
           "start": "2026-11-05T21:42:48.738580059Z",
           "end": "2026-11-05T21:42:48.898807536Z",
           "start_ms": 4876,
@@ -2040,7 +2040,7 @@
             "get_requires_for_build_editable",
             "/tmp/tmpg_f2qgmj"
           ],
-          "cwd": "/agentloupe-real-agent/networkx",
+          "cwd": "/forkline-real-agent/networkx",
           "start": "2026-11-05T21:42:48.899857592Z",
           "end": "2026-11-05T21:42:49.085930071Z",
           "start_ms": 5037,
@@ -2064,7 +2064,7 @@
             "prepare_metadata_for_build_editable",
             "/tmp/tmp2cyhyja3"
           ],
-          "cwd": "/agentloupe-real-agent/networkx",
+          "cwd": "/forkline-real-agent/networkx",
           "start": "2026-11-05T21:42:49.087226572Z",
           "end": "2026-11-05T21:42:49.212003986Z",
           "start_ms": 5224,
@@ -2088,7 +2088,7 @@
             "build_editable",
             "/tmp/tmpehkvi3ly"
           ],
-          "cwd": "/agentloupe-real-agent/networkx",
+          "cwd": "/forkline-real-agent/networkx",
           "start": "2026-11-05T21:42:49.322456819Z",
           "end": "2026-11-05T21:42:49.46357312Z",
           "start_ms": 5460,
@@ -2110,7 +2110,7 @@
             "tail",
             "-3"
           ],
-          "cwd": "/agentloupe-real-agent/networkx",
+          "cwd": "/forkline-real-agent/networkx",
           "start": "2026-11-05T21:42:48.314442475Z",
           "end": "2026-11-05T21:42:50.016677045Z",
           "start_ms": 4452,
@@ -2130,9 +2130,9 @@
           "argv": [
             "/bin/sh",
             "-c",
-            "python3 /u/demo/dev-inframatrix/AgentLoupe/hooks/agentloupe_hook.py"
+            "python3 /u/demo/dev-inframatrix/forkline/hooks/forkline_hook.py"
           ],
-          "cwd": "/agentloupe-real-agent/networkx",
+          "cwd": "/forkline-real-agent/networkx",
           "start": "2026-11-05T21:42:50.023659746Z",
           "end": "2026-11-05T21:42:50.038733662Z",
           "start_ms": 6161,
@@ -2150,9 +2150,9 @@
           "filename": "/usr/bin/python3.14",
           "argv": [
             "python3",
-            "/u/demo/dev-inframatrix/AgentLoupe/hooks/agentloupe_hook.py"
+            "/u/demo/dev-inframatrix/forkline/hooks/forkline_hook.py"
           ],
-          "cwd": "/agentloupe-real-agent/networkx",
+          "cwd": "/forkline-real-agent/networkx",
           "start": "2026-11-05T21:42:50.024464815Z",
           "end": "2026-11-05T21:42:50.038546639Z",
           "start_ms": 6162,
@@ -2173,9 +2173,9 @@
           "argv": [
             "/bin/sh",
             "-c",
-            "python3 /u/demo/dev-inframatrix/AgentLoupe/hooks/agentloupe_hook.py"
+            "python3 /u/demo/dev-inframatrix/forkline/hooks/forkline_hook.py"
           ],
-          "cwd": "/agentloupe-real-agent/networkx",
+          "cwd": "/forkline-real-agent/networkx",
           "start": "2026-11-05T21:42:52.895002388Z",
           "end": "2026-11-05T21:42:52.913538265Z",
           "start_ms": 9032,
@@ -2194,9 +2194,9 @@
           "filename": "/usr/bin/python3.14",
           "argv": [
             "python3",
-            "/u/demo/dev-inframatrix/AgentLoupe/hooks/agentloupe_hook.py"
+            "/u/demo/dev-inframatrix/forkline/hooks/forkline_hook.py"
           ],
-          "cwd": "/agentloupe-real-agent/networkx",
+          "cwd": "/forkline-real-agent/networkx",
           "start": "2026-11-05T21:42:52.895896388Z",
           "end": "2026-11-05T21:42:52.913175797Z",
           "start_ms": 9033,
@@ -2219,7 +2219,7 @@
             "-c",
             "source /u/demo/.claude/shell-snapshots/snapshot-zsh-1793914966995-amtwmb.sh 2\u003e/dev/null || true \u0026\u0026 setopt NO_EXTENDED_GLOB NO_BARE_GLOB_QUAL 2\u003e/dev/null || true \u0026\u0026 { \\builtin unalias -- 'which'; \\builtin unset -f -- 'which'; } \u003e/dev/null 2\u003e\u00261 || true \u0026\u0026 { \\builtin unalias -- 'unsetenv'; \\builtin unset -f -- 'unsetenv'; } \u003e/dev/null 2\u003e\u00261 || true \u0026\u0026 eval '.venv/bin/python -m pytest -q networkx/algorithms/shortest_paths 2\u003e\u00261 | tail -15' \u003c /dev/null \u0026\u0026 pwd -P \u003e| /tmp/claude-1180-cwd"
           ],
-          "cwd": "/agentloupe-real-agent/networkx",
+          "cwd": "/forkline-real-agent/networkx",
           "start": "2026-11-05T21:42:52.920614373Z",
           "end": "2026-11-05T21:42:53.555983159Z",
           "start_ms": 9058,
@@ -2244,7 +2244,7 @@
             "-q",
             "networkx/algorithms/shortest_paths"
           ],
-          "cwd": "/agentloupe-real-agent/networkx",
+          "cwd": "/forkline-real-agent/networkx",
           "start": "2026-11-05T21:42:52.928702549Z",
           "end": "2026-11-05T21:42:53.554293548Z",
           "start_ms": 9066,
@@ -2266,7 +2266,7 @@
             "tail",
             "-15"
           ],
-          "cwd": "/agentloupe-real-agent/networkx",
+          "cwd": "/forkline-real-agent/networkx",
           "start": "2026-11-05T21:42:52.928963176Z",
           "end": "2026-11-05T21:42:53.555430392Z",
           "start_ms": 9066,
@@ -2287,9 +2287,9 @@
           "argv": [
             "/bin/sh",
             "-c",
-            "python3 /u/demo/dev-inframatrix/AgentLoupe/hooks/agentloupe_hook.py"
+            "python3 /u/demo/dev-inframatrix/forkline/hooks/forkline_hook.py"
           ],
-          "cwd": "/agentloupe-real-agent/networkx",
+          "cwd": "/forkline-real-agent/networkx",
           "start": "2026-11-05T21:42:53.562163131Z",
           "end": "2026-11-05T21:42:53.580177323Z",
           "start_ms": 9699,
@@ -2308,9 +2308,9 @@
           "filename": "/usr/bin/python3.14",
           "argv": [
             "python3",
-            "/u/demo/dev-inframatrix/AgentLoupe/hooks/agentloupe_hook.py"
+            "/u/demo/dev-inframatrix/forkline/hooks/forkline_hook.py"
           ],
-          "cwd": "/agentloupe-real-agent/networkx",
+          "cwd": "/forkline-real-agent/networkx",
           "start": "2026-11-05T21:42:53.562927163Z",
           "end": "2026-11-05T21:42:53.57994927Z",
           "start_ms": 9700,
@@ -2331,9 +2331,9 @@
           "argv": [
             "/bin/sh",
             "-c",
-            "python3 /u/demo/dev-inframatrix/AgentLoupe/hooks/agentloupe_hook.py"
+            "python3 /u/demo/dev-inframatrix/forkline/hooks/forkline_hook.py"
           ],
-          "cwd": "/agentloupe-real-agent/networkx",
+          "cwd": "/forkline-real-agent/networkx",
           "start": "2026-11-05T21:42:56.433617583Z",
           "end": "2026-11-05T21:42:56.450867297Z",
           "start_ms": 12571,
@@ -2351,9 +2351,9 @@
           "filename": "/usr/bin/python3.14",
           "argv": [
             "python3",
-            "/u/demo/dev-inframatrix/AgentLoupe/hooks/agentloupe_hook.py"
+            "/u/demo/dev-inframatrix/forkline/hooks/forkline_hook.py"
           ],
-          "cwd": "/agentloupe-real-agent/networkx",
+          "cwd": "/forkline-real-agent/networkx",
           "start": "2026-11-05T21:42:56.434436708Z",
           "end": "2026-11-05T21:42:56.450408041Z",
           "start_ms": 12572,
@@ -2374,9 +2374,9 @@
           "argv": [
             "/bin/sh",
             "-c",
-            "python3 /u/demo/dev-inframatrix/AgentLoupe/hooks/agentloupe_hook.py"
+            "python3 /u/demo/dev-inframatrix/forkline/hooks/forkline_hook.py"
           ],
-          "cwd": "/agentloupe-real-agent/networkx",
+          "cwd": "/forkline-real-agent/networkx",
           "start": "2026-11-05T21:42:56.459430996Z",
           "end": "2026-11-05T21:42:56.475443791Z",
           "start_ms": 12597,
@@ -2395,9 +2395,9 @@
           "filename": "/usr/bin/python3.14",
           "argv": [
             "python3",
-            "/u/demo/dev-inframatrix/AgentLoupe/hooks/agentloupe_hook.py"
+            "/u/demo/dev-inframatrix/forkline/hooks/forkline_hook.py"
           ],
-          "cwd": "/agentloupe-real-agent/networkx",
+          "cwd": "/forkline-real-agent/networkx",
           "start": "2026-11-05T21:42:56.460103148Z",
           "end": "2026-11-05T21:42:56.475143325Z",
           "start_ms": 12597,
@@ -2418,9 +2418,9 @@
           "argv": [
             "/bin/sh",
             "-c",
-            "python3 /u/demo/dev-inframatrix/AgentLoupe/hooks/agentloupe_hook.py"
+            "python3 /u/demo/dev-inframatrix/forkline/hooks/forkline_hook.py"
           ],
-          "cwd": "/agentloupe-real-agent/networkx",
+          "cwd": "/forkline-real-agent/networkx",
           "start": "2026-11-05T21:42:57.419139979Z",
           "end": "2026-11-05T21:42:57.440644664Z",
           "start_ms": 13556,
@@ -2439,9 +2439,9 @@
           "filename": "/usr/bin/python3.14",
           "argv": [
             "python3",
-            "/u/demo/dev-inframatrix/AgentLoupe/hooks/agentloupe_hook.py"
+            "/u/demo/dev-inframatrix/forkline/hooks/forkline_hook.py"
           ],
-          "cwd": "/agentloupe-real-agent/networkx",
+          "cwd": "/forkline-real-agent/networkx",
           "start": "2026-11-05T21:42:57.419927252Z",
           "end": "2026-11-05T21:42:57.440320867Z",
           "start_ms": 13557,
@@ -2462,9 +2462,9 @@
           "argv": [
             "/bin/sh",
             "-c",
-            "python3 /u/demo/dev-inframatrix/AgentLoupe/hooks/agentloupe_hook.py"
+            "python3 /u/demo/dev-inframatrix/forkline/hooks/forkline_hook.py"
           ],
-          "cwd": "/agentloupe-real-agent/networkx",
+          "cwd": "/forkline-real-agent/networkx",
           "start": "2026-11-05T21:42:57.449473745Z",
           "end": "2026-11-05T21:42:57.468344788Z",
           "start_ms": 13587,
@@ -2482,9 +2482,9 @@
           "filename": "/usr/bin/python3.14",
           "argv": [
             "python3",
-            "/u/demo/dev-inframatrix/AgentLoupe/hooks/agentloupe_hook.py"
+            "/u/demo/dev-inframatrix/forkline/hooks/forkline_hook.py"
           ],
-          "cwd": "/agentloupe-real-agent/networkx",
+          "cwd": "/forkline-real-agent/networkx",
           "start": "2026-11-05T21:42:57.45023607Z",
           "end": "2026-11-05T21:42:57.467962234Z",
           "start_ms": 13587,
@@ -2505,9 +2505,9 @@
           "argv": [
             "/bin/sh",
             "-c",
-            "python3 /u/demo/dev-inframatrix/AgentLoupe/hooks/agentloupe_hook.py"
+            "python3 /u/demo/dev-inframatrix/forkline/hooks/forkline_hook.py"
           ],
-          "cwd": "/agentloupe-real-agent/networkx",
+          "cwd": "/forkline-real-agent/networkx",
           "start": "2026-11-05T21:42:59.902549072Z",
           "end": "2026-11-05T21:42:59.916830497Z",
           "start_ms": 16040,
@@ -2525,9 +2525,9 @@
           "filename": "/usr/bin/python3.14",
           "argv": [
             "python3",
-            "/u/demo/dev-inframatrix/AgentLoupe/hooks/agentloupe_hook.py"
+            "/u/demo/dev-inframatrix/forkline/hooks/forkline_hook.py"
           ],
-          "cwd": "/agentloupe-real-agent/networkx",
+          "cwd": "/forkline-real-agent/networkx",
           "start": "2026-11-05T21:42:59.903418129Z",
           "end": "2026-11-05T21:42:59.916457192Z",
           "start_ms": 16041,
@@ -2550,7 +2550,7 @@
             "-c",
             "source /u/demo/.claude/shell-snapshots/snapshot-zsh-1793914966995-amtwmb.sh 2\u003e/dev/null || true \u0026\u0026 setopt NO_EXTENDED_GLOB NO_BARE_GLOB_QUAL 2\u003e/dev/null || true \u0026\u0026 { \\builtin unalias -- 'which'; \\builtin unset -f -- 'which'; } \u003e/dev/null 2\u003e\u00261 || true \u0026\u0026 { \\builtin unalias -- 'unsetenv'; \\builtin unset -f -- 'unsetenv'; } \u003e/dev/null 2\u003e\u00261 || true \u0026\u0026 eval 'git status --short \u0026\u0026 .venv/bin/python -m pytest -q networkx/algorithms/shortest_paths 2\u003e\u00261 | tail -2 \u0026\u0026 .venv/bin/python -m pytes"
           ],
-          "cwd": "/agentloupe-real-agent/networkx",
+          "cwd": "/forkline-real-agent/networkx",
           "start": "2026-11-05T21:42:59.926211319Z",
           "end": "2026-11-05T21:43:36.949747877Z",
           "start_ms": 16063,
@@ -2573,7 +2573,7 @@
             "status",
             "--short"
           ],
-          "cwd": "/agentloupe-real-agent/networkx",
+          "cwd": "/forkline-real-agent/networkx",
           "start": "2026-11-05T21:42:59.931433512Z",
           "end": "2026-11-05T21:42:59.95987184Z",
           "start_ms": 16069,
@@ -2598,7 +2598,7 @@
             "-q",
             "networkx/algorithms/shortest_paths"
           ],
-          "cwd": "/agentloupe-real-agent/networkx",
+          "cwd": "/forkline-real-agent/networkx",
           "start": "2026-11-05T21:42:59.960334769Z",
           "end": "2026-11-05T21:43:00.258025119Z",
           "start_ms": 16098,
@@ -2620,7 +2620,7 @@
             "tail",
             "-2"
           ],
-          "cwd": "/agentloupe-real-agent/networkx",
+          "cwd": "/forkline-real-agent/networkx",
           "start": "2026-11-05T21:42:59.9606842Z",
           "end": "2026-11-05T21:43:00.25917537Z",
           "start_ms": 16098,
@@ -2645,7 +2645,7 @@
             "-q",
             "networkx"
           ],
-          "cwd": "/agentloupe-real-agent/networkx",
+          "cwd": "/forkline-real-agent/networkx",
           "start": "2026-11-05T21:43:00.25970813Z",
           "end": "2026-11-05T21:43:36.946910982Z",
           "start_ms": 16397,
@@ -2667,7 +2667,7 @@
             "tail",
             "-3"
           ],
-          "cwd": "/agentloupe-real-agent/networkx",
+          "cwd": "/forkline-real-agent/networkx",
           "start": "2026-11-05T21:43:00.260110139Z",
           "end": "2026-11-05T21:43:36.949197138Z",
           "start_ms": 16397,
@@ -2688,9 +2688,9 @@
           "argv": [
             "/bin/sh",
             "-c",
-            "python3 /u/demo/dev-inframatrix/AgentLoupe/hooks/agentloupe_hook.py"
+            "python3 /u/demo/dev-inframatrix/forkline/hooks/forkline_hook.py"
           ],
-          "cwd": "/agentloupe-real-agent/networkx",
+          "cwd": "/forkline-real-agent/networkx",
           "start": "2026-11-05T21:43:36.955386746Z",
           "end": "2026-11-05T21:43:36.97577504Z",
           "start_ms": 53093,
@@ -2709,9 +2709,9 @@
           "filename": "/usr/bin/python3.14",
           "argv": [
             "python3",
-            "/u/demo/dev-inframatrix/AgentLoupe/hooks/agentloupe_hook.py"
+            "/u/demo/dev-inframatrix/forkline/hooks/forkline_hook.py"
           ],
-          "cwd": "/agentloupe-real-agent/networkx",
+          "cwd": "/forkline-real-agent/networkx",
           "start": "2026-11-05T21:43:36.956146877Z",
           "end": "2026-11-05T21:43:36.975466268Z",
           "start_ms": 53093,
@@ -4921,7 +4921,7 @@
           "offset_ms": 3998,
           "type": "file_rename",
           "pid": 31054,
-          "detail": "/agentloupe-real-agent/networkx/.venv/lib/python3.14/site-packages/pip/_internal/__pycache__/__init__.cpython-314.pyc.140154474296608 -\u003e /agentloupe-real-agent/networkx/.venv/lib/python3.14/site-packages/pip/_internal/__pycache__/__init__.cpython-314.pyc"
+          "detail": "/forkline-real-agent/networkx/.venv/lib/python3.14/site-packages/pip/_internal/__pycache__/__init__.cpython-314.pyc.140154474296608 -\u003e /forkline-real-agent/networkx/.venv/lib/python3.14/site-packages/pip/_internal/__pycache__/__init__.cpython-314.pyc"
         },
         {
           "ts": "2026-11-05T21:42:47.86430132Z",
@@ -4942,7 +4942,7 @@
           "offset_ms": 4010,
           "type": "file_rename",
           "pid": 31054,
-          "detail": "/agentloupe-real-agent/networkx/.venv/lib/python3.14/site-packages/pip/_internal/commands/__pycache__/__init__.cpython-314.pyc.140154473267600 -\u003e /agentloupe-real-agent/networkx/.venv/lib/python3.14/site-packages/pip/_internal/commands/__pycache__/__init__.cpython-314.pyc"
+          "detail": "/forkline-real-agent/networkx/.venv/lib/python3.14/site-packages/pip/_internal/commands/__pycache__/__init__.cpython-314.pyc.140154473267600 -\u003e /forkline-real-agent/networkx/.venv/lib/python3.14/site-packages/pip/_internal/commands/__pycache__/__init__.cpython-314.pyc"
         },
         {
           "ts": "2026-11-05T21:42:47.876252343Z",
@@ -4963,7 +4963,7 @@
           "offset_ms": 4023,
           "type": "file_rename",
           "pid": 31054,
-          "detail": "/agentloupe-real-agent/networkx/.venv/lib/python3.14/site-packages/pip/_internal/commands/__pycache__/show.cpython-314.pyc.140154473270768 -\u003e /agentloupe-real-agent/networkx/.venv/lib/python3.14/site-packages/pip/_internal/commands/__pycache__/show.cpython-314.pyc"
+          "detail": "/forkline-real-agent/networkx/.venv/lib/python3.14/site-packages/pip/_internal/commands/__pycache__/show.cpython-314.pyc.140154473270768 -\u003e /forkline-real-agent/networkx/.venv/lib/python3.14/site-packages/pip/_internal/commands/__pycache__/show.cpython-314.pyc"
         },
         {
           "ts": "2026-11-05T21:42:47.888384626Z",
@@ -4984,7 +4984,7 @@
           "offset_ms": 4037,
           "type": "file_rename",
           "pid": 31054,
-          "detail": "/agentloupe-real-agent/networkx/.venv/lib/python3.14/site-packages/pip/_internal/locations/__pycache__/_sysconfig.cpython-314.pyc.140154473272880 -\u003e /agentloupe-real-agent/networkx/.venv/lib/python3.14/site-packages/pip/_internal/locations/__pycache__/_sysconfig.cpython-314.pyc"
+          "detail": "/forkline-real-agent/networkx/.venv/lib/python3.14/site-packages/pip/_internal/locations/__pycache__/_sysconfig.cpython-314.pyc.140154473272880 -\u003e /forkline-real-agent/networkx/.venv/lib/python3.14/site-packages/pip/_internal/locations/__pycache__/_sysconfig.cpython-314.pyc"
         },
         {
           "ts": "2026-11-05T21:42:47.903521007Z",
@@ -5005,7 +5005,7 @@
           "offset_ms": 4047,
           "type": "file_rename",
           "pid": 31054,
-          "detail": "/agentloupe-real-agent/networkx/.venv/lib/python3.14/site-packages/pip/_internal/models/__pycache__/installation_report.cpython-314.pyc.140154476673520 -\u003e /agentloupe-real-agent/networkx/.venv/lib/python3.14/site-packages/pip/_internal/models/__pycache__/installation_report.cpython-314.pyc"
+          "detail": "/forkline-real-agent/networkx/.venv/lib/python3.14/site-packages/pip/_internal/models/__pycache__/installation_report.cpython-314.pyc.140154476673520 -\u003e /forkline-real-agent/networkx/.venv/lib/python3.14/site-packages/pip/_internal/models/__pycache__/installation_report.cpython-314.pyc"
         },
         {
           "ts": "2026-11-05T21:42:47.912851108Z",
@@ -5026,7 +5026,7 @@
           "offset_ms": 4058,
           "type": "file_rename",
           "pid": 31054,
-          "detail": "/agentloupe-real-agent/networkx/.venv/lib/python3.14/site-packages/pip/_internal/operations/__pycache__/__init__.cpython-314.pyc.140154473279216 -\u003e /agentloupe-real-agent/networkx/.venv/lib/python3.14/site-packages/pip/_internal/operations/__pycache__/__init__.cpython-314.pyc"
+          "detail": "/forkline-real-agent/networkx/.venv/lib/python3.14/site-packages/pip/_internal/operations/__pycache__/__init__.cpython-314.pyc.140154473279216 -\u003e /forkline-real-agent/networkx/.venv/lib/python3.14/site-packages/pip/_internal/operations/__pycache__/__init__.cpython-314.pyc"
         },
         {
           "ts": "2026-11-05T21:42:47.922374305Z",
@@ -5047,7 +5047,7 @@
           "offset_ms": 4068,
           "type": "file_rename",
           "pid": 31054,
-          "detail": "/agentloupe-real-agent/networkx/.venv/lib/python3.14/site-packages/pip/_internal/req/__pycache__/__init__.cpython-314.pyc.140154473279744 -\u003e /agentloupe-real-agent/networkx/.venv/lib/python3.14/site-packages/pip/_internal/req/__pycache__/__init__.cpython-314.pyc"
+          "detail": "/forkline-real-agent/networkx/.venv/lib/python3.14/site-packages/pip/_internal/req/__pycache__/__init__.cpython-314.pyc.140154473279744 -\u003e /forkline-real-agent/networkx/.venv/lib/python3.14/site-packages/pip/_internal/req/__pycache__/__init__.cpython-314.pyc"
         },
         {
           "ts": "2026-11-05T21:42:47.937549198Z",
@@ -5068,7 +5068,7 @@
           "offset_ms": 4086,
           "type": "file_rename",
           "pid": 31054,
-          "detail": "/agentloupe-real-agent/networkx/.venv/lib/python3.14/site-packages/pip/_internal/resolution/resolvelib/__pycache__/provider.cpython-314.pyc.140154474174704 -\u003e /agentloupe-real-agent/networkx/.venv/lib/python3.14/site-packages/pip/_internal/resolution/resolvelib/__pycache__/provider.cpython-314.pyc"
+          "detail": "/forkline-real-agent/networkx/.venv/lib/python3.14/site-packages/pip/_internal/resolution/resolvelib/__pycache__/provider.cpython-314.pyc.140154474174704 -\u003e /forkline-real-agent/networkx/.venv/lib/python3.14/site-packages/pip/_internal/resolution/resolvelib/__pycache__/provider.cpython-314.pyc"
         },
         {
           "ts": "2026-11-05T21:42:47.952081586Z",
@@ -5089,7 +5089,7 @@
           "offset_ms": 4093,
           "type": "file_rename",
           "pid": 31054,
-          "detail": "/agentloupe-real-agent/networkx/.venv/lib/python3.14/site-packages/pip/_internal/utils/__pycache__/filesystem.cpython-314.pyc.140154473273760 -\u003e /agentloupe-real-agent/networkx/.venv/lib/python3.14/site-packages/pip/_internal/utils/__pycache__/filesystem.cpython-314.pyc"
+          "detail": "/forkline-real-agent/networkx/.venv/lib/python3.14/site-packages/pip/_internal/utils/__pycache__/filesystem.cpython-314.pyc.140154473273760 -\u003e /forkline-real-agent/networkx/.venv/lib/python3.14/site-packages/pip/_internal/utils/__pycache__/filesystem.cpython-314.pyc"
         },
         {
           "ts": "2026-11-05T21:42:47.960889263Z",
@@ -5110,7 +5110,7 @@
           "offset_ms": 4104,
           "type": "file_rename",
           "pid": 31054,
-          "detail": "/agentloupe-real-agent/networkx/.venv/lib/python3.14/site-packages/pip/_internal/vcs/__pycache__/bazaar.cpython-314.pyc.140154472040208 -\u003e /agentloupe-real-agent/networkx/.venv/lib/python3.14/site-packages/pip/_internal/vcs/__pycache__/bazaar.cpython-314.pyc"
+          "detail": "/forkline-real-agent/networkx/.venv/lib/python3.14/site-packages/pip/_internal/vcs/__pycache__/bazaar.cpython-314.pyc.140154472040208 -\u003e /forkline-real-agent/networkx/.venv/lib/python3.14/site-packages/pip/_internal/vcs/__pycache__/bazaar.cpython-314.pyc"
         },
         {
           "ts": "2026-11-05T21:42:47.972697712Z",
@@ -5131,7 +5131,7 @@
           "offset_ms": 4115,
           "type": "file_rename",
           "pid": 31054,
-          "detail": "/agentloupe-real-agent/networkx/.venv/lib/python3.14/site-packages/pip/_vendor/cachecontrol/__pycache__/heuristics.cpython-314.pyc.140154472043904 -\u003e /agentloupe-real-agent/networkx/.venv/lib/python3.14/site-packages/pip/_vendor/cachecontrol/__pycache__/heuristics.cpython-314.pyc"
+          "detail": "/forkline-real-agent/networkx/.venv/lib/python3.14/site-packages/pip/_vendor/cachecontrol/__pycache__/heuristics.cpython-314.pyc.140154472043904 -\u003e /forkline-real-agent/networkx/.venv/lib/python3.14/site-packages/pip/_vendor/cachecontrol/__pycache__/heuristics.cpython-314.pyc"
         },
         {
           "ts": "2026-11-05T21:42:47.979363037Z",
@@ -5152,7 +5152,7 @@
           "offset_ms": 4131,
           "type": "file_rename",
           "pid": 31054,
-          "detail": "/agentloupe-real-agent/networkx/.venv/lib/python3.14/site-packages/pip/_vendor/distlib/__pycache__/locators.cpython-314.pyc.140154472045488 -\u003e /agentloupe-real-agent/networkx/.venv/lib/python3.14/site-packages/pip/_vendor/distlib/__pycache__/locators.cpython-314.pyc"
+          "detail": "/forkline-real-agent/networkx/.venv/lib/python3.14/site-packages/pip/_vendor/distlib/__pycache__/locators.cpython-314.pyc.140154472045488 -\u003e /forkline-real-agent/networkx/.venv/lib/python3.14/site-packages/pip/_vendor/distlib/__pycache__/locators.cpython-314.pyc"
         },
         {
           "ts": "2026-11-05T21:42:48.002006546Z",
@@ -5173,7 +5173,7 @@
           "offset_ms": 4162,
           "type": "file_rename",
           "pid": 31054,
-          "detail": "/agentloupe-real-agent/networkx/.venv/lib/python3.14/site-packages/pip/_vendor/idna/__pycache__/idnadata.cpython-314.pyc.140154472050768 -\u003e /agentloupe-real-agent/networkx/.venv/lib/python3.14/site-packages/pip/_vendor/idna/__pycache__/idnadata.cpython-314.pyc"
+          "detail": "/forkline-real-agent/networkx/.venv/lib/python3.14/site-packages/pip/_vendor/idna/__pycache__/idnadata.cpython-314.pyc.140154472050768 -\u003e /forkline-real-agent/networkx/.venv/lib/python3.14/site-packages/pip/_vendor/idna/__pycache__/idnadata.cpython-314.pyc"
         },
         {
           "ts": "2026-11-05T21:42:48.05432878Z",
@@ -5194,7 +5194,7 @@
           "offset_ms": 4202,
           "type": "file_rename",
           "pid": 31054,
-          "detail": "/agentloupe-real-agent/networkx/.venv/lib/python3.14/site-packages/pip/_vendor/packaging/licenses/__pycache__/_spdx.cpython-314.pyc.140154472050944 -\u003e /agentloupe-real-agent/networkx/.venv/lib/python3.14/site-packages/pip/_vendor/packaging/licenses/__pycache__/_spdx.cpython-314.pyc"
+          "detail": "/forkline-real-agent/networkx/.venv/lib/python3.14/site-packages/pip/_vendor/packaging/licenses/__pycache__/_spdx.cpython-314.pyc.140154472050944 -\u003e /forkline-real-agent/networkx/.venv/lib/python3.14/site-packages/pip/_vendor/packaging/licenses/__pycache__/_spdx.cpython-314.pyc"
         },
         {
           "ts": "2026-11-05T21:42:48.073274226Z",
@@ -5215,7 +5215,7 @@
           "offset_ms": 4232,
           "type": "file_rename",
           "pid": 31054,
-          "detail": "/agentloupe-real-agent/networkx/.venv/lib/python3.14/site-packages/pip/_vendor/platformdirs/__pycache__/windows.cpython-314.pyc.140154472053584 -\u003e /agentloupe-real-agent/networkx/.venv/lib/python3.14/site-packages/pip/_vendor/platformdirs/__pycache__/windows.cpython-314.pyc"
+          "detail": "/forkline-real-agent/networkx/.venv/lib/python3.14/site-packages/pip/_vendor/platformdirs/__pycache__/windows.cpython-314.pyc.140154472053584 -\u003e /forkline-real-agent/networkx/.venv/lib/python3.14/site-packages/pip/_vendor/platformdirs/__pycache__/windows.cpython-314.pyc"
         },
         {
           "ts": "2026-11-05T21:42:48.097940086Z",
@@ -5236,7 +5236,7 @@
           "offset_ms": 4253,
           "type": "file_rename",
           "pid": 31054,
-          "detail": "/agentloupe-real-agent/networkx/.venv/lib/python3.14/site-packages/pip/_vendor/pygments/__pycache__/scanner.cpython-314.pyc.140154472235936 -\u003e /agentloupe-real-agent/networkx/.venv/lib/python3.14/site-packages/pip/_vendor/pygments/__pycache__/scanner.cpython-314.pyc"
+          "detail": "/forkline-real-agent/networkx/.venv/lib/python3.14/site-packages/pip/_vendor/pygments/__pycache__/scanner.cpython-314.pyc.140154472235936 -\u003e /forkline-real-agent/networkx/.venv/lib/python3.14/site-packages/pip/_vendor/pygments/__pycache__/scanner.cpython-314.pyc"
         },
         {
           "ts": "2026-11-05T21:42:48.118230042Z",
@@ -5257,7 +5257,7 @@
           "offset_ms": 4262,
           "type": "file_rename",
           "pid": 31054,
-          "detail": "/agentloupe-real-agent/networkx/.venv/lib/python3.14/site-packages/pip/_vendor/requests/__pycache__/api.cpython-314.pyc.140154472238928 -\u003e /agentloupe-real-agent/networkx/.venv/lib/python3.14/site-packages/pip/_vendor/requests/__pycache__/api.cpython-314.pyc"
+          "detail": "/forkline-real-agent/networkx/.venv/lib/python3.14/site-packages/pip/_vendor/requests/__pycache__/api.cpython-314.pyc.140154472238928 -\u003e /forkline-real-agent/networkx/.venv/lib/python3.14/site-packages/pip/_vendor/requests/__pycache__/api.cpython-314.pyc"
         },
         {
           "ts": "2026-11-05T21:42:48.128358657Z",
@@ -5278,7 +5278,7 @@
           "offset_ms": 4275,
           "type": "file_rename",
           "pid": 31054,
-          "detail": "/agentloupe-real-agent/networkx/.venv/lib/python3.14/site-packages/pip/_vendor/resolvelib/__pycache__/reporters.cpython-314.pyc.140154472239808 -\u003e /agentloupe-real-agent/networkx/.venv/lib/python3.14/site-packages/pip/_vendor/resolvelib/__pycache__/reporters.cpython-314.pyc"
+          "detail": "/forkline-real-agent/networkx/.venv/lib/python3.14/site-packages/pip/_vendor/resolvelib/__pycache__/reporters.cpython-314.pyc.140154472239808 -\u003e /forkline-real-agent/networkx/.venv/lib/python3.14/site-packages/pip/_vendor/resolvelib/__pycache__/reporters.cpython-314.pyc"
         },
         {
           "ts": "2026-11-05T21:42:48.140222583Z",
@@ -5299,7 +5299,7 @@
           "offset_ms": 4290,
           "type": "file_rename",
           "pid": 31054,
-          "detail": "/agentloupe-real-agent/networkx/.venv/lib/python3.14/site-packages/pip/_vendor/rich/__pycache__/_log_render.cpython-314.pyc.140154472239104 -\u003e /agentloupe-real-agent/networkx/.venv/lib/python3.14/site-packages/pip/_vendor/rich/__pycache__/_log_render.cpython-314.pyc"
+          "detail": "/forkline-real-agent/networkx/.venv/lib/python3.14/site-packages/pip/_vendor/rich/__pycache__/_log_render.cpython-314.pyc.140154472239104 -\u003e /forkline-real-agent/networkx/.venv/lib/python3.14/site-packages/pip/_vendor/rich/__pycache__/_log_render.cpython-314.pyc"
         },
         {
           "ts": "2026-11-05T21:42:48.154866995Z",
@@ -5320,7 +5320,7 @@
           "offset_ms": 4298,
           "type": "file_rename",
           "pid": 31054,
-          "detail": "/agentloupe-real-agent/networkx/.venv/lib/python3.14/site-packages/pip/_vendor/rich/__pycache__/bar.cpython-314.pyc.140154474018928 -\u003e /agentloupe-real-agent/networkx/.venv/lib/python3.14/site-packages/pip/_vendor/rich/__pycache__/bar.cpython-314.pyc"
+          "detail": "/forkline-real-agent/networkx/.venv/lib/python3.14/site-packages/pip/_vendor/rich/__pycache__/bar.cpython-314.pyc.140154474018928 -\u003e /forkline-real-agent/networkx/.venv/lib/python3.14/site-packages/pip/_vendor/rich/__pycache__/bar.cpython-314.pyc"
         },
         {
           "ts": "2026-11-05T21:42:48.166294036Z",
@@ -5341,7 +5341,7 @@
           "offset_ms": 4316,
           "type": "file_rename",
           "pid": 31054,
-          "detail": "/agentloupe-real-agent/networkx/.venv/lib/python3.14/site-packages/pip/_vendor/rich/__pycache__/highlighter.cpython-314.pyc.140154472250896 -\u003e /agentloupe-real-agent/networkx/.venv/lib/python3.14/site-packages/pip/_vendor/rich/__pycache__/highlighter.cpython-314.pyc"
+          "detail": "/forkline-real-agent/networkx/.venv/lib/python3.14/site-packages/pip/_vendor/rich/__pycache__/highlighter.cpython-314.pyc.140154472250896 -\u003e /forkline-real-agent/networkx/.venv/lib/python3.14/site-packages/pip/_vendor/rich/__pycache__/highlighter.cpython-314.pyc"
         },
         {
           "ts": "2026-11-05T21:42:48.1838714Z",
@@ -5362,7 +5362,7 @@
           "offset_ms": 4336,
           "type": "file_rename",
           "pid": 31054,
-          "detail": "/agentloupe-real-agent/networkx/.venv/lib/python3.14/site-packages/pip/_vendor/rich/__pycache__/prompt.cpython-314.pyc.140154464684144 -\u003e /agentloupe-real-agent/networkx/.venv/lib/python3.14/site-packages/pip/_vendor/rich/__pycache__/prompt.cpython-314.pyc"
+          "detail": "/forkline-real-agent/networkx/.venv/lib/python3.14/site-packages/pip/_vendor/rich/__pycache__/prompt.cpython-314.pyc.140154464684144 -\u003e /forkline-real-agent/networkx/.venv/lib/python3.14/site-packages/pip/_vendor/rich/__pycache__/prompt.cpython-314.pyc"
         },
         {
           "ts": "2026-11-05T21:42:48.201042459Z",
@@ -5383,7 +5383,7 @@
           "offset_ms": 4356,
           "type": "file_rename",
           "pid": 31054,
-          "detail": "/agentloupe-real-agent/networkx/.venv/lib/python3.14/site-packages/pip/_vendor/rich/__pycache__/theme.cpython-314.pyc.140154464684672 -\u003e /agentloupe-real-agent/networkx/.venv/lib/python3.14/site-packages/pip/_vendor/rich/__pycache__/theme.cpython-314.pyc"
+          "detail": "/forkline-real-agent/networkx/.venv/lib/python3.14/site-packages/pip/_vendor/rich/__pycache__/theme.cpython-314.pyc.140154464684672 -\u003e /forkline-real-agent/networkx/.venv/lib/python3.14/site-packages/pip/_vendor/rich/__pycache__/theme.cpython-314.pyc"
         },
         {
           "ts": "2026-11-05T21:42:48.22522092Z",
@@ -5404,7 +5404,7 @@
           "offset_ms": 4380,
           "type": "file_rename",
           "pid": 31054,
-          "detail": "/agentloupe-real-agent/networkx/.venv/lib/python3.14/site-packages/pip/_vendor/__pycache__/typing_extensions.cpython-314.pyc.140154464690480 -\u003e /agentloupe-real-agent/networkx/.venv/lib/python3.14/site-packages/pip/_vendor/__pycache__/typing_extensions.cpython-314.pyc"
+          "detail": "/forkline-real-agent/networkx/.venv/lib/python3.14/site-packages/pip/_vendor/__pycache__/typing_extensions.cpython-314.pyc.140154464690480 -\u003e /forkline-real-agent/networkx/.venv/lib/python3.14/site-packages/pip/_vendor/__pycache__/typing_extensions.cpython-314.pyc"
         },
         {
           "ts": "2026-11-05T21:42:48.24811184Z",
@@ -5425,7 +5425,7 @@
           "offset_ms": 4394,
           "type": "file_rename",
           "pid": 31054,
-          "detail": "/agentloupe-real-agent/networkx/.venv/lib/python3.14/site-packages/pip/_vendor/urllib3/__pycache__/exceptions.cpython-314.pyc.140154464697168 -\u003e /agentloupe-real-agent/networkx/.venv/lib/python3.14/site-packages/pip/_vendor/urllib3/__pycache__/exceptions.cpython-314.pyc"
+          "detail": "/forkline-real-agent/networkx/.venv/lib/python3.14/site-packages/pip/_vendor/urllib3/__pycache__/exceptions.cpython-314.pyc.140154464697168 -\u003e /forkline-real-agent/networkx/.venv/lib/python3.14/site-packages/pip/_vendor/urllib3/__pycache__/exceptions.cpython-314.pyc"
         },
         {
           "ts": "2026-11-05T21:42:48.257897418Z",
@@ -5446,7 +5446,7 @@
           "offset_ms": 4404,
           "type": "file_rename",
           "pid": 31054,
-          "detail": "/agentloupe-real-agent/networkx/.venv/lib/python3.14/site-packages/pip/_vendor/urllib3/util/__pycache__/response.cpython-314.pyc.140154464695584 -\u003e /agentloupe-real-agent/networkx/.venv/lib/python3.14/site-packages/pip/_vendor/urllib3/util/__pycache__/response.cpython-314.pyc"
+          "detail": "/forkline-real-agent/networkx/.venv/lib/python3.14/site-packages/pip/_vendor/urllib3/util/__pycache__/response.cpython-314.pyc.140154464695584 -\u003e /forkline-real-agent/networkx/.venv/lib/python3.14/site-packages/pip/_vendor/urllib3/util/__pycache__/response.cpython-314.pyc"
         },
         {
           "ts": "2026-11-05T21:42:48.270979626Z",
@@ -8302,7 +8302,7 @@
           "offset_ms": 5639,
           "type": "file_rename",
           "pid": 31071,
-          "detail": "/agentloupe-real-agent/networkx/.venv/lib/python3.14/site-packages/pygments/formatters/__pycache__/groff.cpython-314.pyc.133485395906384 -\u003e /agentloupe-real-agent/networkx/.venv/lib/python3.14/site-packages/pygments/formatters/__pycache__/groff.cpython-314.pyc"
+          "detail": "/forkline-real-agent/networkx/.venv/lib/python3.14/site-packages/pygments/formatters/__pycache__/groff.cpython-314.pyc.133485395906384 -\u003e /forkline-real-agent/networkx/.venv/lib/python3.14/site-packages/pygments/formatters/__pycache__/groff.cpython-314.pyc"
         },
         {
           "ts": "2026-11-05T21:42:49.50840338Z",
@@ -8323,7 +8323,7 @@
           "offset_ms": 5662,
           "type": "file_rename",
           "pid": 31071,
-          "detail": "/agentloupe-real-agent/networkx/.venv/lib/python3.14/site-packages/pygments/lexers/__pycache__/_cocoa_builtins.cpython-314.pyc.133485397192432 -\u003e /agentloupe-real-agent/networkx/.venv/lib/python3.14/site-packages/pygments/lexers/__pycache__/_cocoa_builtins.cpython-314.pyc"
+          "detail": "/forkline-real-agent/networkx/.venv/lib/python3.14/site-packages/pygments/lexers/__pycache__/_cocoa_builtins.cpython-314.pyc.133485397192432 -\u003e /forkline-real-agent/networkx/.venv/lib/python3.14/site-packages/pygments/lexers/__pycache__/_cocoa_builtins.cpython-314.pyc"
         },
         {
           "ts": "2026-11-05T21:42:49.532398939Z",
@@ -8344,7 +8344,7 @@
           "offset_ms": 5696,
           "type": "file_rename",
           "pid": 31071,
-          "detail": "/agentloupe-real-agent/networkx/.venv/lib/python3.14/site-packages/pygments/lexers/__pycache__/_scheme_builtins.cpython-314.pyc.133485394837904 -\u003e /agentloupe-real-agent/networkx/.venv/lib/python3.14/site-packages/pygments/lexers/__pycache__/_scheme_builtins.cpython-314.pyc"
+          "detail": "/forkline-real-agent/networkx/.venv/lib/python3.14/site-packages/pygments/lexers/__pycache__/_scheme_builtins.cpython-314.pyc.133485394837904 -\u003e /forkline-real-agent/networkx/.venv/lib/python3.14/site-packages/pygments/lexers/__pycache__/_scheme_builtins.cpython-314.pyc"
         },
         {
           "ts": "2026-11-05T21:42:49.566171225Z",
@@ -8365,7 +8365,7 @@
           "offset_ms": 5720,
           "type": "file_rename",
           "pid": 31071,
-          "detail": "/agentloupe-real-agent/networkx/.venv/lib/python3.14/site-packages/pygments/lexers/__pycache__/ampl.cpython-314.pyc.133485394125616 -\u003e /agentloupe-real-agent/networkx/.venv/lib/python3.14/site-packages/pygments/lexers/__pycache__/ampl.cpython-314.pyc"
+          "detail": "/forkline-real-agent/networkx/.venv/lib/python3.14/site-packages/pygments/lexers/__pycache__/ampl.cpython-314.pyc.133485394125616 -\u003e /forkline-real-agent/networkx/.venv/lib/python3.14/site-packages/pygments/lexers/__pycache__/ampl.cpython-314.pyc"
         },
         {
           "ts": "2026-11-05T21:42:49.586628593Z",
@@ -8386,7 +8386,7 @@
           "offset_ms": 5732,
           "type": "file_rename",
           "pid": 31071,
-          "detail": "/agentloupe-real-agent/networkx/.venv/lib/python3.14/site-packages/pygments/lexers/__pycache__/blueprint.cpython-314.pyc.133485394841952 -\u003e /agentloupe-real-agent/networkx/.venv/lib/python3.14/site-packages/pygments/lexers/__pycache__/blueprint.cpython-314.pyc"
+          "detail": "/forkline-real-agent/networkx/.venv/lib/python3.14/site-packages/pygments/lexers/__pycache__/blueprint.cpython-314.pyc.133485394841952 -\u003e /forkline-real-agent/networkx/.venv/lib/python3.14/site-packages/pygments/lexers/__pycache__/blueprint.cpython-314.pyc"
         },
         {
           "ts": "2026-11-05T21:42:49.600159639Z",
@@ -8407,7 +8407,7 @@
           "offset_ms": 5744,
           "type": "file_rename",
           "pid": 31071,
-          "detail": "/agentloupe-real-agent/networkx/.venv/lib/python3.14/site-packages/pygments/lexers/__pycache__/console.cpython-314.pyc.133485394844240 -\u003e /agentloupe-real-agent/networkx/.venv/lib/python3.14/site-packages/pygments/lexers/__pycache__/console.cpython-314.pyc"
+          "detail": "/forkline-real-agent/networkx/.venv/lib/python3.14/site-packages/pygments/lexers/__pycache__/console.cpython-314.pyc.133485394844240 -\u003e /forkline-real-agent/networkx/.venv/lib/python3.14/site-packages/pygments/lexers/__pycache__/console.cpython-314.pyc"
         },
         {
           "ts": "2026-11-05T21:42:49.611796854Z",
@@ -8428,7 +8428,7 @@
           "offset_ms": 5760,
           "type": "file_rename",
           "pid": 31071,
-          "detail": "/agentloupe-real-agent/networkx/.venv/lib/python3.14/site-packages/pygments/lexers/__pycache__/eiffel.cpython-314.pyc.133485394845824 -\u003e /agentloupe-real-agent/networkx/.venv/lib/python3.14/site-packages/pygments/lexers/__pycache__/eiffel.cpython-314.pyc"
+          "detail": "/forkline-real-agent/networkx/.venv/lib/python3.14/site-packages/pygments/lexers/__pycache__/eiffel.cpython-314.pyc.133485394845824 -\u003e /forkline-real-agent/networkx/.venv/lib/python3.14/site-packages/pygments/lexers/__pycache__/eiffel.cpython-314.pyc"
         },
         {
           "ts": "2026-11-05T21:42:49.626403263Z",
@@ -8449,7 +8449,7 @@
           "offset_ms": 5770,
           "type": "file_rename",
           "pid": 31071,
-          "detail": "/agentloupe-real-agent/networkx/.venv/lib/python3.14/site-packages/pygments/lexers/__pycache__/func.cpython-314.pyc.133485394129936 -\u003e /agentloupe-real-agent/networkx/.venv/lib/python3.14/site-packages/pygments/lexers/__pycache__/func.cpython-314.pyc"
+          "detail": "/forkline-real-agent/networkx/.venv/lib/python3.14/site-packages/pygments/lexers/__pycache__/func.cpython-314.pyc.133485394129936 -\u003e /forkline-real-agent/networkx/.venv/lib/python3.14/site-packages/pygments/lexers/__pycache__/func.cpython-314.pyc"
         },
         {
           "ts": "2026-11-05T21:42:49.634126384Z",
@@ -8470,7 +8470,7 @@
           "offset_ms": 5782,
           "type": "file_rename",
           "pid": 31071,
-          "detail": "/agentloupe-real-agent/networkx/.venv/lib/python3.14/site-packages/pygments/lexers/__pycache__/hdl.cpython-314.pyc.133485394130096 -\u003e /agentloupe-real-agent/networkx/.venv/lib/python3.14/site-packages/pygments/lexers/__pycache__/hdl.cpython-314.pyc"
+          "detail": "/forkline-real-agent/networkx/.venv/lib/python3.14/site-packages/pygments/lexers/__pycache__/hdl.cpython-314.pyc.133485394130096 -\u003e /forkline-real-agent/networkx/.venv/lib/python3.14/site-packages/pygments/lexers/__pycache__/hdl.cpython-314.pyc"
         },
         {
           "ts": "2026-11-05T21:42:49.649273595Z",
@@ -8491,7 +8491,7 @@
           "offset_ms": 5798,
           "type": "file_rename",
           "pid": 31071,
-          "detail": "/agentloupe-real-agent/networkx/.venv/lib/python3.14/site-packages/pygments/lexers/__pycache__/julia.cpython-314.pyc.133485394852336 -\u003e /agentloupe-real-agent/networkx/.venv/lib/python3.14/site-packages/pygments/lexers/__pycache__/julia.cpython-314.pyc"
+          "detail": "/forkline-real-agent/networkx/.venv/lib/python3.14/site-packages/pygments/lexers/__pycache__/julia.cpython-314.pyc.133485394852336 -\u003e /forkline-real-agent/networkx/.venv/lib/python3.14/site-packages/pygments/lexers/__pycache__/julia.cpython-314.pyc"
         },
         {
           "ts": "2026-11-05T21:42:49.668044074Z",
@@ -8512,7 +8512,7 @@
           "offset_ms": 5828,
           "type": "file_rename",
           "pid": 31071,
-          "detail": "/agentloupe-real-agent/networkx/.venv/lib/python3.14/site-packages/pygments/lexers/__pycache__/mime.cpython-314.pyc.133485394132016 -\u003e /agentloupe-real-agent/networkx/.venv/lib/python3.14/site-packages/pygments/lexers/__pycache__/mime.cpython-314.pyc"
+          "detail": "/forkline-real-agent/networkx/.venv/lib/python3.14/site-packages/pygments/lexers/__pycache__/mime.cpython-314.pyc.133485394132016 -\u003e /forkline-real-agent/networkx/.venv/lib/python3.14/site-packages/pygments/lexers/__pycache__/mime.cpython-314.pyc"
         },
         {
           "ts": "2026-11-05T21:42:49.697162854Z",
@@ -8533,7 +8533,7 @@
           "offset_ms": 5844,
           "type": "file_rename",
           "pid": 31071,
-          "detail": "/agentloupe-real-agent/networkx/.venv/lib/python3.14/site-packages/pygments/lexers/__pycache__/ooc.cpython-314.pyc.133485393904944 -\u003e /agentloupe-real-agent/networkx/.venv/lib/python3.14/site-packages/pygments/lexers/__pycache__/ooc.cpython-314.pyc"
+          "detail": "/forkline-real-agent/networkx/.venv/lib/python3.14/site-packages/pygments/lexers/__pycache__/ooc.cpython-314.pyc.133485393904944 -\u003e /forkline-real-agent/networkx/.venv/lib/python3.14/site-packages/pygments/lexers/__pycache__/ooc.cpython-314.pyc"
         },
         {
           "ts": "2026-11-05T21:42:49.710830055Z",
@@ -8554,7 +8554,7 @@
           "offset_ms": 5857,
           "type": "file_rename",
           "pid": 31071,
-          "detail": "/agentloupe-real-agent/networkx/.venv/lib/python3.14/site-packages/pygments/lexers/__pycache__/promql.cpython-314.pyc.133485393481552 -\u003e /agentloupe-real-agent/networkx/.venv/lib/python3.14/site-packages/pygments/lexers/__pycache__/promql.cpython-314.pyc"
+          "detail": "/forkline-real-agent/networkx/.venv/lib/python3.14/site-packages/pygments/lexers/__pycache__/promql.cpython-314.pyc.133485393481552 -\u003e /forkline-real-agent/networkx/.venv/lib/python3.14/site-packages/pygments/lexers/__pycache__/promql.cpython-314.pyc"
         },
         {
           "ts": "2026-11-05T21:42:49.724544001Z",
@@ -8575,7 +8575,7 @@
           "offset_ms": 5866,
           "type": "file_rename",
           "pid": 31071,
-          "detail": "/agentloupe-real-agent/networkx/.venv/lib/python3.14/site-packages/pygments/lexers/__pycache__/rnc.cpython-314.pyc.133485393907664 -\u003e /agentloupe-real-agent/networkx/.venv/lib/python3.14/site-packages/pygments/lexers/__pycache__/rnc.cpython-314.pyc"
+          "detail": "/forkline-real-agent/networkx/.venv/lib/python3.14/site-packages/pygments/lexers/__pycache__/rnc.cpython-314.pyc.133485393907664 -\u003e /forkline-real-agent/networkx/.venv/lib/python3.14/site-packages/pygments/lexers/__pycache__/rnc.cpython-314.pyc"
         },
         {
           "ts": "2026-11-05T21:42:49.734521092Z",
@@ -8596,7 +8596,7 @@
           "offset_ms": 5882,
           "type": "file_rename",
           "pid": 31071,
-          "detail": "/agentloupe-real-agent/networkx/.venv/lib/python3.14/site-packages/pygments/lexers/__pycache__/snobol.cpython-314.pyc.133485393483664 -\u003e /agentloupe-real-agent/networkx/.venv/lib/python3.14/site-packages/pygments/lexers/__pycache__/snobol.cpython-314.pyc"
+          "detail": "/forkline-real-agent/networkx/.venv/lib/python3.14/site-packages/pygments/lexers/__pycache__/snobol.cpython-314.pyc.133485393483664 -\u003e /forkline-real-agent/networkx/.venv/lib/python3.14/site-packages/pygments/lexers/__pycache__/snobol.cpython-314.pyc"
         },
         {
           "ts": "2026-11-05T21:42:49.746457227Z",
@@ -8617,7 +8617,7 @@
           "offset_ms": 5895,
           "type": "file_rename",
           "pid": 31071,
-          "detail": "/agentloupe-real-agent/networkx/.venv/lib/python3.14/site-packages/pygments/lexers/__pycache__/teraterm.cpython-314.pyc.133485393486480 -\u003e /agentloupe-real-agent/networkx/.venv/lib/python3.14/site-packages/pygments/lexers/__pycache__/teraterm.cpython-314.pyc"
+          "detail": "/forkline-real-agent/networkx/.venv/lib/python3.14/site-packages/pygments/lexers/__pycache__/teraterm.cpython-314.pyc.133485393486480 -\u003e /forkline-real-agent/networkx/.venv/lib/python3.14/site-packages/pygments/lexers/__pycache__/teraterm.cpython-314.pyc"
         },
         {
           "ts": "2026-11-05T21:42:49.761624412Z",
@@ -8638,7 +8638,7 @@
           "offset_ms": 5905,
           "type": "file_rename",
           "pid": 31071,
-          "detail": "/agentloupe-real-agent/networkx/.venv/lib/python3.14/site-packages/pygments/lexers/__pycache__/usd.cpython-314.pyc.133485393913584 -\u003e /agentloupe-real-agent/networkx/.venv/lib/python3.14/site-packages/pygments/lexers/__pycache__/usd.cpython-314.pyc"
+          "detail": "/forkline-real-agent/networkx/.venv/lib/python3.14/site-packages/pygments/lexers/__pycache__/usd.cpython-314.pyc.133485393913584 -\u003e /forkline-real-agent/networkx/.venv/lib/python3.14/site-packages/pygments/lexers/__pycache__/usd.cpython-314.pyc"
         },
         {
           "ts": "2026-11-05T21:42:49.769642655Z",
@@ -8659,7 +8659,7 @@
           "offset_ms": 5913,
           "type": "file_rename",
           "pid": 31071,
-          "detail": "/agentloupe-real-agent/networkx/.venv/lib/python3.14/site-packages/pygments/lexers/__pycache__/yang.cpython-314.pyc.133485393914384 -\u003e /agentloupe-real-agent/networkx/.venv/lib/python3.14/site-packages/pygments/lexers/__pycache__/yang.cpython-314.pyc"
+          "detail": "/forkline-real-agent/networkx/.venv/lib/python3.14/site-packages/pygments/lexers/__pycache__/yang.cpython-314.pyc.133485393914384 -\u003e /forkline-real-agent/networkx/.venv/lib/python3.14/site-packages/pygments/lexers/__pycache__/yang.cpython-314.pyc"
         },
         {
           "ts": "2026-11-05T21:42:49.777197042Z",
@@ -8680,7 +8680,7 @@
           "offset_ms": 5918,
           "type": "file_rename",
           "pid": 31071,
-          "detail": "/agentloupe-real-agent/networkx/.venv/lib/python3.14/site-packages/pygments/styles/__pycache__/borland.cpython-314.pyc.133485393490176 -\u003e /agentloupe-real-agent/networkx/.venv/lib/python3.14/site-packages/pygments/styles/__pycache__/borland.cpython-314.pyc"
+          "detail": "/forkline-real-agent/networkx/.venv/lib/python3.14/site-packages/pygments/styles/__pycache__/borland.cpython-314.pyc.133485393490176 -\u003e /forkline-real-agent/networkx/.venv/lib/python3.14/site-packages/pygments/styles/__pycache__/borland.cpython-314.pyc"
         },
         {
           "ts": "2026-11-05T21:42:49.781680345Z",
@@ -8701,7 +8701,7 @@
           "offset_ms": 5921,
           "type": "file_rename",
           "pid": 31071,
-          "detail": "/agentloupe-real-agent/networkx/.venv/lib/python3.14/site-packages/pygments/styles/__pycache__/lovelace.cpython-314.pyc.133485393492640 -\u003e /agentloupe-real-agent/networkx/.venv/lib/python3.14/site-packages/pygments/styles/__pycache__/lovelace.cpython-314.pyc"
+          "detail": "/forkline-real-agent/networkx/.venv/lib/python3.14/site-packages/pygments/styles/__pycache__/lovelace.cpython-314.pyc.133485393492640 -\u003e /forkline-real-agent/networkx/.venv/lib/python3.14/site-packages/pygments/styles/__pycache__/lovelace.cpython-314.pyc"
         },
         {
           "ts": "2026-11-05T21:42:49.785052542Z",
@@ -8722,7 +8722,7 @@
           "offset_ms": 5925,
           "type": "file_rename",
           "pid": 31071,
-          "detail": "/agentloupe-real-agent/networkx/.venv/lib/python3.14/site-packages/pygments/styles/__pycache__/solarized.cpython-314.pyc.133485393069136 -\u003e /agentloupe-real-agent/networkx/.venv/lib/python3.14/site-packages/pygments/styles/__pycache__/solarized.cpython-314.pyc"
+          "detail": "/forkline-real-agent/networkx/.venv/lib/python3.14/site-packages/pygments/styles/__pycache__/solarized.cpython-314.pyc.133485393069136 -\u003e /forkline-real-agent/networkx/.venv/lib/python3.14/site-packages/pygments/styles/__pycache__/solarized.cpython-314.pyc"
         },
         {
           "ts": "2026-11-05T21:42:49.788505756Z",
@@ -8806,7 +8806,7 @@
           "offset_ms": 5962,
           "type": "file_rename",
           "pid": 31071,
-          "detail": "/agentloupe-real-agent/networkx/.venv/lib/python3.14/site-packages/packaging/__pycache__/pylock.cpython-314.pyc.133485394131536 -\u003e /agentloupe-real-agent/networkx/.venv/lib/python3.14/site-packages/packaging/__pycache__/pylock.cpython-314.pyc"
+          "detail": "/forkline-real-agent/networkx/.venv/lib/python3.14/site-packages/packaging/__pycache__/pylock.cpython-314.pyc.133485394131536 -\u003e /forkline-real-agent/networkx/.venv/lib/python3.14/site-packages/packaging/__pycache__/pylock.cpython-314.pyc"
         },
         {
           "ts": "2026-11-05T21:42:49.837498299Z",
@@ -8890,7 +8890,7 @@
           "offset_ms": 5998,
           "type": "file_rename",
           "pid": 31071,
-          "detail": "/agentloupe-real-agent/networkx/.venv/lib/python3.14/site-packages/_pytest/_io/__pycache__/__init__.cpython-314.pyc.133485394132816 -\u003e /agentloupe-real-agent/networkx/.venv/lib/python3.14/site-packages/_pytest/_io/__pycache__/__init__.cpython-314.pyc"
+          "detail": "/forkline-real-agent/networkx/.venv/lib/python3.14/site-packages/_pytest/_io/__pycache__/__init__.cpython-314.pyc.133485394132816 -\u003e /forkline-real-agent/networkx/.venv/lib/python3.14/site-packages/_pytest/_io/__pycache__/__init__.cpython-314.pyc"
         },
         {
           "ts": "2026-11-05T21:42:49.864961817Z",
@@ -8911,7 +8911,7 @@
           "offset_ms": 6014,
           "type": "file_rename",
           "pid": 31071,
-          "detail": "/agentloupe-real-agent/networkx/.venv/lib/python3.14/site-packages/_pytest/assertion/__pycache__/_typing.cpython-314.pyc.133485396544656 -\u003e /agentloupe-real-agent/networkx/.venv/lib/python3.14/site-packages/_pytest/assertion/__pycache__/_typing.cpython-314.pyc"
+          "detail": "/forkline-real-agent/networkx/.venv/lib/python3.14/site-packages/_pytest/assertion/__pycache__/_typing.cpython-314.pyc.133485396544656 -\u003e /forkline-real-agent/networkx/.venv/lib/python3.14/site-packages/_pytest/assertion/__pycache__/_typing.cpython-314.pyc"
         },
         {
           "ts": "2026-11-05T21:42:49.88359864Z",
@@ -8932,7 +8932,7 @@
           "offset_ms": 6044,
           "type": "file_rename",
           "pid": 31071,
-          "detail": "/agentloupe-real-agent/networkx/.venv/lib/python3.14/site-packages/_pytest/__pycache__/faulthandler.cpython-314.pyc.133485394131056 -\u003e /agentloupe-real-agent/networkx/.venv/lib/python3.14/site-packages/_pytest/__pycache__/faulthandler.cpython-314.pyc"
+          "detail": "/forkline-real-agent/networkx/.venv/lib/python3.14/site-packages/_pytest/__pycache__/faulthandler.cpython-314.pyc.133485394131056 -\u003e /forkline-real-agent/networkx/.venv/lib/python3.14/site-packages/_pytest/__pycache__/faulthandler.cpython-314.pyc"
         },
         {
           "ts": "2026-11-05T21:42:49.919473211Z",
@@ -8953,7 +8953,7 @@
           "offset_ms": 6074,
           "type": "file_rename",
           "pid": 31071,
-          "detail": "/agentloupe-real-agent/networkx/.venv/lib/python3.14/site-packages/_pytest/__pycache__/pastebin.cpython-314.pyc.133485394128016 -\u003e /agentloupe-real-agent/networkx/.venv/lib/python3.14/site-packages/_pytest/__pycache__/pastebin.cpython-314.pyc"
+          "detail": "/forkline-real-agent/networkx/.venv/lib/python3.14/site-packages/_pytest/__pycache__/pastebin.cpython-314.pyc.133485394128016 -\u003e /forkline-real-agent/networkx/.venv/lib/python3.14/site-packages/_pytest/__pycache__/pastebin.cpython-314.pyc"
         },
         {
           "ts": "2026-11-05T21:42:49.956786293Z",
@@ -8974,7 +8974,7 @@
           "offset_ms": 6115,
           "type": "file_rename",
           "pid": 31071,
-          "detail": "/agentloupe-real-agent/networkx/.venv/lib/python3.14/site-packages/_pytest/__pycache__/terminal.cpython-314.pyc.133485394121776 -\u003e /agentloupe-real-agent/networkx/.venv/lib/python3.14/site-packages/_pytest/__pycache__/terminal.cpython-314.pyc"
+          "detail": "/forkline-real-agent/networkx/.venv/lib/python3.14/site-packages/_pytest/__pycache__/terminal.cpython-314.pyc.133485394121776 -\u003e /forkline-real-agent/networkx/.venv/lib/python3.14/site-packages/_pytest/__pycache__/terminal.cpython-314.pyc"
         },
         {
           "ts": "2026-11-05T21:42:49.980196502Z",
@@ -9289,7 +9289,7 @@
           "offset_ms": 6170,
           "type": "file_open",
           "pid": 31118,
-          "detail": "/u/demo/dev-inframatrix/AgentLoupe/hooks flags=100352"
+          "detail": "/u/demo/dev-inframatrix/forkline/hooks flags=100352"
         },
         {
           "ts": "2026-11-05T21:42:50.035749302Z",
@@ -9492,7 +9492,7 @@
           "offset_ms": 9146,
           "type": "file_rename",
           "pid": 31122,
-          "detail": "/agentloupe-real-agent/networkx/networkx/__pycache__/lazy_imports.cpython-314.pyc.134178124092208 -\u003e /agentloupe-real-agent/networkx/networkx/__pycache__/lazy_imports.cpython-314.pyc"
+          "detail": "/forkline-real-agent/networkx/networkx/__pycache__/lazy_imports.cpython-314.pyc.134178124092208 -\u003e /forkline-real-agent/networkx/networkx/__pycache__/lazy_imports.cpython-314.pyc"
         },
         {
           "ts": "2026-11-05T21:42:53.013224786Z",
@@ -9506,7 +9506,7 @@
           "offset_ms": 9160,
           "type": "file_rename",
           "pid": 31122,
-          "detail": "/agentloupe-real-agent/networkx/networkx/utils/__pycache__/backends.cpython-314.pyc.134178124411952 -\u003e /agentloupe-real-agent/networkx/networkx/utils/__pycache__/backends.cpython-314.pyc"
+          "detail": "/forkline-real-agent/networkx/networkx/utils/__pycache__/backends.cpython-314.pyc.134178124411952 -\u003e /forkline-real-agent/networkx/networkx/utils/__pycache__/backends.cpython-314.pyc"
         },
         {
           "ts": "2026-11-05T21:42:53.026155675Z",
@@ -9527,7 +9527,7 @@
           "offset_ms": 9180,
           "type": "file_rename",
           "pid": 31122,
-          "detail": "/agentloupe-real-agent/networkx/networkx/__pycache__/relabel.cpython-314.pyc.134178123093168 -\u003e /agentloupe-real-agent/networkx/networkx/__pycache__/relabel.cpython-314.pyc"
+          "detail": "/forkline-real-agent/networkx/networkx/__pycache__/relabel.cpython-314.pyc.134178123093168 -\u003e /forkline-real-agent/networkx/networkx/__pycache__/relabel.cpython-314.pyc"
         },
         {
           "ts": "2026-11-05T21:42:53.04625038Z",
@@ -9548,7 +9548,7 @@
           "offset_ms": 9194,
           "type": "file_rename",
           "pid": 31122,
-          "detail": "/agentloupe-real-agent/networkx/networkx/generators/__pycache__/interval_graph.cpython-314.pyc.134178123208368 -\u003e /agentloupe-real-agent/networkx/networkx/generators/__pycache__/interval_graph.cpython-314.pyc"
+          "detail": "/forkline-real-agent/networkx/networkx/generators/__pycache__/interval_graph.cpython-314.pyc.134178123208368 -\u003e /forkline-real-agent/networkx/networkx/generators/__pycache__/interval_graph.cpython-314.pyc"
         },
         {
           "ts": "2026-11-05T21:42:53.061729239Z",
@@ -9569,14 +9569,14 @@
           "offset_ms": 9209,
           "type": "file_rename",
           "pid": 31122,
-          "detail": "/agentloupe-real-agent/networkx/networkx/readwrite/__pycache__/__init__.cpython-314.pyc.134178124269584 -\u003e /agentloupe-real-agent/networkx/networkx/readwrite/__pycache__/__init__.cpython-314.pyc"
+          "detail": "/forkline-real-agent/networkx/networkx/readwrite/__pycache__/__init__.cpython-314.pyc.134178124269584 -\u003e /forkline-real-agent/networkx/networkx/readwrite/__pycache__/__init__.cpython-314.pyc"
         },
         {
           "ts": "2026-11-05T21:42:53.075541684Z",
           "offset_ms": 9213,
           "type": "file_rename",
           "pid": 31122,
-          "detail": "/agentloupe-real-agent/networkx/networkx/readwrite/__pycache__/leda.cpython-314.pyc.134178122245424 -\u003e /agentloupe-real-agent/networkx/networkx/readwrite/__pycache__/leda.cpython-314.pyc"
+          "detail": "/forkline-real-agent/networkx/networkx/readwrite/__pycache__/leda.cpython-314.pyc.134178122245424 -\u003e /forkline-real-agent/networkx/networkx/readwrite/__pycache__/leda.cpython-314.pyc"
         },
         {
           "ts": "2026-11-05T21:42:53.086293037Z",
@@ -9597,7 +9597,7 @@
           "offset_ms": 9229,
           "type": "file_rename",
           "pid": 31122,
-          "detail": "/agentloupe-real-agent/networkx/networkx/algorithms/assortativity/__pycache__/correlation.cpython-314.pyc.134178122219024 -\u003e /agentloupe-real-agent/networkx/networkx/algorithms/assortativity/__pycache__/correlation.cpython-314.pyc"
+          "detail": "/forkline-real-agent/networkx/networkx/algorithms/assortativity/__pycache__/correlation.cpython-314.pyc.134178122219024 -\u003e /forkline-real-agent/networkx/networkx/algorithms/assortativity/__pycache__/correlation.cpython-314.pyc"
         },
         {
           "ts": "2026-11-05T21:42:53.094178927Z",
@@ -9632,7 +9632,7 @@
           "offset_ms": 9248,
           "type": "file_rename",
           "pid": 31122,
-          "detail": "/agentloupe-real-agent/networkx/networkx/algorithms/centrality/__pycache__/group.cpython-314.pyc.134178122810976 -\u003e /agentloupe-real-agent/networkx/networkx/algorithms/centrality/__pycache__/group.cpython-314.pyc"
+          "detail": "/forkline-real-agent/networkx/networkx/algorithms/centrality/__pycache__/group.cpython-314.pyc.134178122810976 -\u003e /forkline-real-agent/networkx/networkx/algorithms/centrality/__pycache__/group.cpython-314.pyc"
         },
         {
           "ts": "2026-11-05T21:42:53.113093121Z",
@@ -9660,14 +9660,14 @@
           "offset_ms": 9260,
           "type": "file_rename",
           "pid": 31122,
-          "detail": "/agentloupe-real-agent/networkx/networkx/algorithms/__pycache__/communicability_alg.cpython-314.pyc.134178120824656 -\u003e /agentloupe-real-agent/networkx/networkx/algorithms/__pycache__/communicability_alg.cpython-314.pyc"
+          "detail": "/forkline-real-agent/networkx/networkx/algorithms/__pycache__/communicability_alg.cpython-314.pyc.134178120824656 -\u003e /forkline-real-agent/networkx/networkx/algorithms/__pycache__/communicability_alg.cpython-314.pyc"
         },
         {
           "ts": "2026-11-05T21:42:53.127608977Z",
           "offset_ms": 9265,
           "type": "file_rename",
           "pid": 31122,
-          "detail": "/agentloupe-real-agent/networkx/networkx/algorithms/__pycache__/covering.cpython-314.pyc.134178120822208 -\u003e /agentloupe-real-agent/networkx/networkx/algorithms/__pycache__/covering.cpython-314.pyc"
+          "detail": "/forkline-real-agent/networkx/networkx/algorithms/__pycache__/covering.cpython-314.pyc.134178120822208 -\u003e /forkline-real-agent/networkx/networkx/algorithms/__pycache__/covering.cpython-314.pyc"
         },
         {
           "ts": "2026-11-05T21:42:53.136425153Z",
@@ -9695,21 +9695,21 @@
           "offset_ms": 9285,
           "type": "file_rename",
           "pid": 31122,
-          "detail": "/agentloupe-real-agent/networkx/networkx/algorithms/minors/__pycache__/__init__.cpython-314.pyc.134178120814144 -\u003e /agentloupe-real-agent/networkx/networkx/algorithms/minors/__pycache__/__init__.cpython-314.pyc"
+          "detail": "/forkline-real-agent/networkx/networkx/algorithms/minors/__pycache__/__init__.cpython-314.pyc.134178120814144 -\u003e /forkline-real-agent/networkx/networkx/algorithms/minors/__pycache__/__init__.cpython-314.pyc"
         },
         {
           "ts": "2026-11-05T21:42:53.150254109Z",
           "offset_ms": 9287,
           "type": "file_rename",
           "pid": 31122,
-          "detail": "/agentloupe-real-agent/networkx/networkx/algorithms/operators/__pycache__/__init__.cpython-314.pyc.134178120814432 -\u003e /agentloupe-real-agent/networkx/networkx/algorithms/operators/__pycache__/__init__.cpython-314.pyc"
+          "detail": "/forkline-real-agent/networkx/networkx/algorithms/operators/__pycache__/__init__.cpython-314.pyc.134178120814432 -\u003e /forkline-real-agent/networkx/networkx/algorithms/operators/__pycache__/__init__.cpython-314.pyc"
         },
         {
           "ts": "2026-11-05T21:42:53.156655831Z",
           "offset_ms": 9294,
           "type": "file_rename",
           "pid": 31122,
-          "detail": "/agentloupe-real-agent/networkx/networkx/algorithms/__pycache__/planarity.cpython-314.pyc.134178119869344 -\u003e /agentloupe-real-agent/networkx/networkx/algorithms/__pycache__/planarity.cpython-314.pyc"
+          "detail": "/forkline-real-agent/networkx/networkx/algorithms/__pycache__/planarity.cpython-314.pyc.134178119869344 -\u003e /forkline-real-agent/networkx/networkx/algorithms/__pycache__/planarity.cpython-314.pyc"
         },
         {
           "ts": "2026-11-05T21:42:53.160244652Z",
@@ -9730,14 +9730,14 @@
           "offset_ms": 9309,
           "type": "file_rename",
           "pid": 31122,
-          "detail": "/agentloupe-real-agent/networkx/networkx/algorithms/traversal/__pycache__/__init__.cpython-314.pyc.134178119871792 -\u003e /agentloupe-real-agent/networkx/networkx/algorithms/traversal/__pycache__/__init__.cpython-314.pyc"
+          "detail": "/forkline-real-agent/networkx/networkx/algorithms/traversal/__pycache__/__init__.cpython-314.pyc.134178119871792 -\u003e /forkline-real-agent/networkx/networkx/algorithms/traversal/__pycache__/__init__.cpython-314.pyc"
         },
         {
           "ts": "2026-11-05T21:42:53.174873593Z",
           "offset_ms": 9312,
           "type": "file_rename",
           "pid": 31122,
-          "detail": "/agentloupe-real-agent/networkx/networkx/algorithms/traversal/__pycache__/edgebfs.cpython-314.pyc.134178119874960 -\u003e /agentloupe-real-agent/networkx/networkx/algorithms/traversal/__pycache__/edgebfs.cpython-314.pyc"
+          "detail": "/forkline-real-agent/networkx/networkx/algorithms/traversal/__pycache__/edgebfs.cpython-314.pyc.134178119874960 -\u003e /forkline-real-agent/networkx/networkx/algorithms/traversal/__pycache__/edgebfs.cpython-314.pyc"
         },
         {
           "ts": "2026-11-05T21:42:53.17736369Z",
@@ -9765,7 +9765,7 @@
           "offset_ms": 9327,
           "type": "file_rename",
           "pid": 31122,
-          "detail": "/agentloupe-real-agent/networkx/networkx/algorithms/tree/__pycache__/coding.cpython-314.pyc.134178119862432 -\u003e /agentloupe-real-agent/networkx/networkx/algorithms/tree/__pycache__/coding.cpython-314.pyc"
+          "detail": "/forkline-real-agent/networkx/networkx/algorithms/tree/__pycache__/coding.cpython-314.pyc.134178119862432 -\u003e /forkline-real-agent/networkx/networkx/algorithms/tree/__pycache__/coding.cpython-314.pyc"
         },
         {
           "ts": "2026-11-05T21:42:53.194047129Z",
@@ -9793,14 +9793,14 @@
           "offset_ms": 9341,
           "type": "file_rename",
           "pid": 31122,
-          "detail": "/agentloupe-real-agent/networkx/networkx/algorithms/bipartite/__pycache__/link_analysis.cpython-314.pyc.134178117287984 -\u003e /agentloupe-real-agent/networkx/networkx/algorithms/bipartite/__pycache__/link_analysis.cpython-314.pyc"
+          "detail": "/forkline-real-agent/networkx/networkx/algorithms/bipartite/__pycache__/link_analysis.cpython-314.pyc.134178117287984 -\u003e /forkline-real-agent/networkx/networkx/algorithms/bipartite/__pycache__/link_analysis.cpython-314.pyc"
         },
         {
           "ts": "2026-11-05T21:42:53.206336942Z",
           "offset_ms": 9344,
           "type": "file_rename",
           "pid": 31122,
-          "detail": "/agentloupe-real-agent/networkx/networkx/algorithms/community/__pycache__/divisive.cpython-314.pyc.134178118464784 -\u003e /agentloupe-real-agent/networkx/networkx/algorithms/community/__pycache__/divisive.cpython-314.pyc"
+          "detail": "/forkline-real-agent/networkx/networkx/algorithms/community/__pycache__/divisive.cpython-314.pyc.134178118464784 -\u003e /forkline-real-agent/networkx/networkx/algorithms/community/__pycache__/divisive.cpython-314.pyc"
         },
         {
           "ts": "2026-11-05T21:42:53.209642391Z",
@@ -9828,14 +9828,14 @@
           "offset_ms": 9358,
           "type": "file_rename",
           "pid": 31122,
-          "detail": "/agentloupe-real-agent/networkx/networkx/algorithms/flow/__pycache__/gomory_hu.cpython-314.pyc.134178118467088 -\u003e /agentloupe-real-agent/networkx/networkx/algorithms/flow/__pycache__/gomory_hu.cpython-314.pyc"
+          "detail": "/forkline-real-agent/networkx/networkx/algorithms/flow/__pycache__/gomory_hu.cpython-314.pyc.134178118467088 -\u003e /forkline-real-agent/networkx/networkx/algorithms/flow/__pycache__/gomory_hu.cpython-314.pyc"
         },
         {
           "ts": "2026-11-05T21:42:53.225741555Z",
           "offset_ms": 9363,
           "type": "file_rename",
           "pid": 31122,
-          "detail": "/agentloupe-real-agent/networkx/networkx/algorithms/isomorphism/__pycache__/vf2userfunc.cpython-314.pyc.134178117300624 -\u003e /agentloupe-real-agent/networkx/networkx/algorithms/isomorphism/__pycache__/vf2userfunc.cpython-314.pyc"
+          "detail": "/forkline-real-agent/networkx/networkx/algorithms/isomorphism/__pycache__/vf2userfunc.cpython-314.pyc.134178117300624 -\u003e /forkline-real-agent/networkx/networkx/algorithms/isomorphism/__pycache__/vf2userfunc.cpython-314.pyc"
         },
         {
           "ts": "2026-11-05T21:42:53.234149732Z",
@@ -9870,14 +9870,14 @@
           "offset_ms": 9389,
           "type": "file_rename",
           "pid": 31122,
-          "detail": "/agentloupe-real-agent/networkx/networkx/drawing/__pycache__/__init__.cpython-314.pyc.134178117391472 -\u003e /agentloupe-real-agent/networkx/networkx/drawing/__pycache__/__init__.cpython-314.pyc"
+          "detail": "/forkline-real-agent/networkx/networkx/drawing/__pycache__/__init__.cpython-314.pyc.134178117391472 -\u003e /forkline-real-agent/networkx/networkx/drawing/__pycache__/__init__.cpython-314.pyc"
         },
         {
           "ts": "2026-11-05T21:42:53.264968637Z",
           "offset_ms": 9402,
           "type": "file_rename",
           "pid": 31122,
-          "detail": "/agentloupe-real-agent/networkx/networkx/drawing/__pycache__/nx_pydot.cpython-314.pyc.134178117627328 -\u003e /agentloupe-real-agent/networkx/networkx/drawing/__pycache__/nx_pydot.cpython-314.pyc"
+          "detail": "/forkline-real-agent/networkx/networkx/drawing/__pycache__/nx_pydot.cpython-314.pyc.134178117627328 -\u003e /forkline-real-agent/networkx/networkx/drawing/__pycache__/nx_pydot.cpython-314.pyc"
         },
         {
           "ts": "2026-11-05T21:42:53.271385327Z",
@@ -9940,7 +9940,7 @@
           "offset_ms": 9711,
           "type": "file_open",
           "pid": 31125,
-          "detail": "/u/demo/dev-inframatrix/AgentLoupe/hooks flags=100352"
+          "detail": "/u/demo/dev-inframatrix/forkline/hooks flags=100352"
         },
         {
           "ts": "2026-11-05T21:42:53.577259406Z",
@@ -10024,7 +10024,7 @@
           "offset_ms": 13567,
           "type": "file_open",
           "pid": 31131,
-          "detail": "/u/demo/dev-inframatrix/AgentLoupe/hooks/agentloupe_hook.py flags=32768"
+          "detail": "/u/demo/dev-inframatrix/forkline/hooks/forkline_hook.py flags=32768"
         },
         {
           "ts": "2026-11-05T21:42:57.43498824Z",
@@ -10087,7 +10087,7 @@
           "offset_ms": 16047,
           "type": "file_open",
           "pid": 31136,
-          "detail": "/u/demo/dev-inframatrix/AgentLoupe/hooks/agentloupe_hook.py flags=32768"
+          "detail": "/u/demo/dev-inframatrix/forkline/hooks/forkline_hook.py flags=32768"
         },
         {
           "ts": "2026-11-05T21:42:59.913032355Z",
@@ -11235,7 +11235,7 @@
           "offset_ms": 16594,
           "type": "file_rename",
           "pid": 31141,
-          "detail": "/agentloupe-real-agent/networkx/networkx/algorithms/approximation/tests/__pycache__/test_distance_measures.cpython-314-pytest-9.2.0.pyc.31141 -\u003e /agentloupe-real-agent/networkx/networkx/algorithms/approximation/tests/__pycache__/test_distance_measures.cpython-314-pytest-9.2.0.pyc"
+          "detail": "/forkline-real-agent/networkx/networkx/algorithms/approximation/tests/__pycache__/test_distance_measures.cpython-314-pytest-9.2.0.pyc.31141 -\u003e /forkline-real-agent/networkx/networkx/algorithms/approximation/tests/__pycache__/test_distance_measures.cpython-314-pytest-9.2.0.pyc"
         },
         {
           "ts": "2026-11-05T21:43:00.478831762Z",
@@ -11249,14 +11249,14 @@
           "offset_ms": 16653,
           "type": "file_rename",
           "pid": 31141,
-          "detail": "/agentloupe-real-agent/networkx/networkx/algorithms/assortativity/tests/__pycache__/__init__.cpython-314.pyc.125170753790608 -\u003e /agentloupe-real-agent/networkx/networkx/algorithms/assortativity/tests/__pycache__/__init__.cpython-314.pyc"
+          "detail": "/forkline-real-agent/networkx/networkx/algorithms/assortativity/tests/__pycache__/__init__.cpython-314.pyc.125170753790608 -\u003e /forkline-real-agent/networkx/networkx/algorithms/assortativity/tests/__pycache__/__init__.cpython-314.pyc"
         },
         {
           "ts": "2026-11-05T21:43:00.531350354Z",
           "offset_ms": 16669,
           "type": "file_rename",
           "pid": 31141,
-          "detail": "/agentloupe-real-agent/networkx/networkx/algorithms/assortativity/tests/__pycache__/test_neighbor_degree.cpython-314-pytest-9.2.0.pyc.31141 -\u003e /agentloupe-real-agent/networkx/networkx/algorithms/assortativity/tests/__pycache__/test_neighbor_degree.cpython-314-pytest-9.2.0.pyc"
+          "detail": "/forkline-real-agent/networkx/networkx/algorithms/assortativity/tests/__pycache__/test_neighbor_degree.cpython-314-pytest-9.2.0.pyc.31141 -\u003e /forkline-real-agent/networkx/networkx/algorithms/assortativity/tests/__pycache__/test_neighbor_degree.cpython-314-pytest-9.2.0.pyc"
         },
         {
           "ts": "2026-11-05T21:43:00.556026858Z",
@@ -11277,7 +11277,7 @@
           "offset_ms": 16777,
           "type": "file_rename",
           "pid": 31141,
-          "detail": "/agentloupe-real-agent/networkx/networkx/algorithms/bipartite/tests/__pycache__/test_spectral_bipartivity.cpython-314-pytest-9.2.0.pyc.31141 -\u003e /agentloupe-real-agent/networkx/networkx/algorithms/bipartite/tests/__pycache__/test_spectral_bipartivity.cpython-314-pytest-9.2.0.pyc"
+          "detail": "/forkline-real-agent/networkx/networkx/algorithms/bipartite/tests/__pycache__/test_spectral_bipartivity.cpython-314-pytest-9.2.0.pyc.31141 -\u003e /forkline-real-agent/networkx/networkx/algorithms/bipartite/tests/__pycache__/test_spectral_bipartivity.cpython-314-pytest-9.2.0.pyc"
         },
         {
           "ts": "2026-11-05T21:43:00.687153019Z",
@@ -11298,7 +11298,7 @@
           "offset_ms": 16885,
           "type": "file_rename",
           "pid": 31141,
-          "detail": "/agentloupe-real-agent/networkx/networkx/algorithms/centrality/tests/__pycache__/test_load_centrality.cpython-314-pytest-9.2.0.pyc.31141 -\u003e /agentloupe-real-agent/networkx/networkx/algorithms/centrality/tests/__pycache__/test_load_centrality.cpython-314-pytest-9.2.0.pyc"
+          "detail": "/forkline-real-agent/networkx/networkx/algorithms/centrality/tests/__pycache__/test_load_centrality.cpython-314-pytest-9.2.0.pyc.31141 -\u003e /forkline-real-agent/networkx/networkx/algorithms/centrality/tests/__pycache__/test_load_centrality.cpython-314-pytest-9.2.0.pyc"
         },
         {
           "ts": "2026-11-05T21:43:00.771332233Z",
@@ -11312,14 +11312,14 @@
           "offset_ms": 16931,
           "type": "file_rename",
           "pid": 31141,
-          "detail": "/agentloupe-real-agent/networkx/networkx/algorithms/community/tests/__pycache__/__init__.cpython-314.pyc.125170751717200 -\u003e /agentloupe-real-agent/networkx/networkx/algorithms/community/tests/__pycache__/__init__.cpython-314.pyc"
+          "detail": "/forkline-real-agent/networkx/networkx/algorithms/community/tests/__pycache__/__init__.cpython-314.pyc.125170751717200 -\u003e /forkline-real-agent/networkx/networkx/algorithms/community/tests/__pycache__/__init__.cpython-314.pyc"
         },
         {
           "ts": "2026-11-05T21:43:00.808832142Z",
           "offset_ms": 16946,
           "type": "file_rename",
           "pid": 31141,
-          "detail": "/agentloupe-real-agent/networkx/networkx/algorithms/community/tests/__pycache__/test_kernighan_lin.cpython-314-pytest-9.2.0.pyc.31141 -\u003e /agentloupe-real-agent/networkx/networkx/algorithms/community/tests/__pycache__/test_kernighan_lin.cpython-314-pytest-9.2.0.pyc"
+          "detail": "/forkline-real-agent/networkx/networkx/algorithms/community/tests/__pycache__/test_kernighan_lin.cpython-314-pytest-9.2.0.pyc.31141 -\u003e /forkline-real-agent/networkx/networkx/algorithms/community/tests/__pycache__/test_kernighan_lin.cpython-314-pytest-9.2.0.pyc"
         },
         {
           "ts": "2026-11-05T21:43:00.831966022Z",
@@ -11347,7 +11347,7 @@
           "offset_ms": 17055,
           "type": "file_rename",
           "pid": 31141,
-          "detail": "/agentloupe-real-agent/networkx/networkx/algorithms/connectivity/tests/__pycache__/test_connectivity.cpython-314-pytest-9.2.0.pyc.31141 -\u003e /agentloupe-real-agent/networkx/networkx/algorithms/connectivity/tests/__pycache__/test_connectivity.cpython-314-pytest-9.2.0.pyc"
+          "detail": "/forkline-real-agent/networkx/networkx/algorithms/connectivity/tests/__pycache__/test_connectivity.cpython-314-pytest-9.2.0.pyc.31141 -\u003e /forkline-real-agent/networkx/networkx/algorithms/connectivity/tests/__pycache__/test_connectivity.cpython-314-pytest-9.2.0.pyc"
         },
         {
           "ts": "2026-11-05T21:43:00.969467945Z",
@@ -11410,7 +11410,7 @@
           "offset_ms": 17517,
           "type": "file_rename",
           "pid": 31141,
-          "detail": "/agentloupe-real-agent/networkx/networkx/algorithms/tests/__pycache__/test_bridges.cpython-314-pytest-9.2.0.pyc.31141 -\u003e /agentloupe-real-agent/networkx/networkx/algorithms/tests/__pycache__/test_bridges.cpython-314-pytest-9.2.0.pyc"
+          "detail": "/forkline-real-agent/networkx/networkx/algorithms/tests/__pycache__/test_bridges.cpython-314-pytest-9.2.0.pyc.31141 -\u003e /forkline-real-agent/networkx/networkx/algorithms/tests/__pycache__/test_bridges.cpython-314-pytest-9.2.0.pyc"
         },
         {
           "ts": "2026-11-05T21:43:01.445064366Z",
@@ -11431,7 +11431,7 @@
           "offset_ms": 17762,
           "type": "file_rename",
           "pid": 31141,
-          "detail": "/agentloupe-real-agent/networkx/networkx/algorithms/tests/__pycache__/test_dominating.cpython-314-pytest-9.2.0.pyc.31141 -\u003e /agentloupe-real-agent/networkx/networkx/algorithms/tests/__pycache__/test_dominating.cpython-314-pytest-9.2.0.pyc"
+          "detail": "/forkline-real-agent/networkx/networkx/algorithms/tests/__pycache__/test_dominating.cpython-314-pytest-9.2.0.pyc.31141 -\u003e /forkline-real-agent/networkx/networkx/algorithms/tests/__pycache__/test_dominating.cpython-314-pytest-9.2.0.pyc"
         },
         {
           "ts": "2026-11-05T21:43:01.688793074Z",
@@ -11452,7 +11452,7 @@
           "offset_ms": 17895,
           "type": "file_rename",
           "pid": 31141,
-          "detail": "/agentloupe-real-agent/networkx/networkx/algorithms/tests/__pycache__/test_planar_drawing.cpython-314-pytest-9.2.0.pyc.31141 -\u003e /agentloupe-real-agent/networkx/networkx/algorithms/tests/__pycache__/test_planar_drawing.cpython-314-pytest-9.2.0.pyc"
+          "detail": "/forkline-real-agent/networkx/networkx/algorithms/tests/__pycache__/test_planar_drawing.cpython-314-pytest-9.2.0.pyc.31141 -\u003e /forkline-real-agent/networkx/networkx/algorithms/tests/__pycache__/test_planar_drawing.cpython-314-pytest-9.2.0.pyc"
         },
         {
           "ts": "2026-11-05T21:43:01.779080243Z",
@@ -11473,7 +11473,7 @@
           "offset_ms": 18050,
           "type": "file_rename",
           "pid": 31141,
-          "detail": "/agentloupe-real-agent/networkx/networkx/algorithms/tests/__pycache__/test_time_dependent.cpython-314-pytest-9.2.0.pyc.31141 -\u003e /agentloupe-real-agent/networkx/networkx/algorithms/tests/__pycache__/test_time_dependent.cpython-314-pytest-9.2.0.pyc"
+          "detail": "/forkline-real-agent/networkx/networkx/algorithms/tests/__pycache__/test_time_dependent.cpython-314-pytest-9.2.0.pyc.31141 -\u003e /forkline-real-agent/networkx/networkx/algorithms/tests/__pycache__/test_time_dependent.cpython-314-pytest-9.2.0.pyc"
         },
         {
           "ts": "2026-11-05T21:43:01.936171145Z",
@@ -11494,7 +11494,7 @@
           "offset_ms": 18129,
           "type": "file_rename",
           "pid": 31141,
-          "detail": "/agentloupe-real-agent/networkx/networkx/algorithms/tree/tests/__pycache__/test_branchings.cpython-314-pytest-9.2.0.pyc.31141 -\u003e /agentloupe-real-agent/networkx/networkx/algorithms/tree/tests/__pycache__/test_branchings.cpython-314-pytest-9.2.0.pyc"
+          "detail": "/forkline-real-agent/networkx/networkx/algorithms/tree/tests/__pycache__/test_branchings.cpython-314-pytest-9.2.0.pyc.31141 -\u003e /forkline-real-agent/networkx/networkx/algorithms/tree/tests/__pycache__/test_branchings.cpython-314-pytest-9.2.0.pyc"
         },
         {
           "ts": "2026-11-05T21:43:02.049295115Z",
@@ -11508,7 +11508,7 @@
           "offset_ms": 18304,
           "type": "file_rename",
           "pid": 31141,
-          "detail": "/agentloupe-real-agent/networkx/networkx/classes/tests/__pycache__/historical_tests.cpython-314.pyc.125170739801968 -\u003e /agentloupe-real-agent/networkx/networkx/classes/tests/__pycache__/historical_tests.cpython-314.pyc"
+          "detail": "/forkline-real-agent/networkx/networkx/classes/tests/__pycache__/historical_tests.cpython-314.pyc.125170739801968 -\u003e /forkline-real-agent/networkx/networkx/classes/tests/__pycache__/historical_tests.cpython-314.pyc"
         },
         {
           "ts": "2026-11-05T21:43:02.310495348Z",
@@ -11536,7 +11536,7 @@
           "offset_ms": 18808,
           "type": "file_rename",
           "pid": 31141,
-          "detail": "/agentloupe-real-agent/networkx/networkx/generators/tests/__pycache__/test_cographs.cpython-314-pytest-9.2.0.pyc.31141 -\u003e /agentloupe-real-agent/networkx/networkx/generators/tests/__pycache__/test_cographs.cpython-314-pytest-9.2.0.pyc"
+          "detail": "/forkline-real-agent/networkx/networkx/generators/tests/__pycache__/test_cographs.cpython-314-pytest-9.2.0.pyc.31141 -\u003e /forkline-real-agent/networkx/networkx/generators/tests/__pycache__/test_cographs.cpython-314-pytest-9.2.0.pyc"
         },
         {
           "ts": "2026-11-05T21:43:02.721994069Z",
@@ -11557,7 +11557,7 @@
           "offset_ms": 18943,
           "type": "file_rename",
           "pid": 31141,
-          "detail": "/agentloupe-real-agent/networkx/networkx/generators/tests/__pycache__/test_nonisomorphic_trees.cpython-314-pytest-9.2.0.pyc.31141 -\u003e /agentloupe-real-agent/networkx/networkx/generators/tests/__pycache__/test_nonisomorphic_trees.cpython-314-pytest-9.2.0.pyc"
+          "detail": "/forkline-real-agent/networkx/networkx/generators/tests/__pycache__/test_nonisomorphic_trees.cpython-314-pytest-9.2.0.pyc.31141 -\u003e /forkline-real-agent/networkx/networkx/generators/tests/__pycache__/test_nonisomorphic_trees.cpython-314-pytest-9.2.0.pyc"
         },
         {
           "ts": "2026-11-05T21:43:02.855669717Z",
@@ -11571,21 +11571,21 @@
           "offset_ms": 19022,
           "type": "file_rename",
           "pid": 31141,
-          "detail": "/agentloupe-real-agent/networkx/networkx/linalg/tests/__pycache__/__init__.cpython-314.pyc.125170735257552 -\u003e /agentloupe-real-agent/networkx/networkx/linalg/tests/__pycache__/__init__.cpython-314.pyc"
+          "detail": "/forkline-real-agent/networkx/networkx/linalg/tests/__pycache__/__init__.cpython-314.pyc.125170735257552 -\u003e /forkline-real-agent/networkx/networkx/linalg/tests/__pycache__/__init__.cpython-314.pyc"
         },
         {
           "ts": "2026-11-05T21:43:02.912581578Z",
           "offset_ms": 19050,
           "type": "file_rename",
           "pid": 31141,
-          "detail": "/agentloupe-real-agent/networkx/networkx/linalg/tests/__pycache__/test_laplacian.cpython-314-pytest-9.2.0.pyc.31141 -\u003e /agentloupe-real-agent/networkx/networkx/linalg/tests/__pycache__/test_laplacian.cpython-314-pytest-9.2.0.pyc"
+          "detail": "/forkline-real-agent/networkx/networkx/linalg/tests/__pycache__/test_laplacian.cpython-314-pytest-9.2.0.pyc.31141 -\u003e /forkline-real-agent/networkx/networkx/linalg/tests/__pycache__/test_laplacian.cpython-314-pytest-9.2.0.pyc"
         },
         {
           "ts": "2026-11-05T21:43:02.926243601Z",
           "offset_ms": 19063,
           "type": "file_rename",
           "pid": 31141,
-          "detail": "/agentloupe-real-agent/networkx/networkx/readwrite/json_graph/tests/__pycache__/test_adjacency.cpython-314-pytest-9.2.0.pyc.31141 -\u003e /agentloupe-real-agent/networkx/networkx/readwrite/json_graph/tests/__pycache__/test_adjacency.cpython-314-pytest-9.2.0.pyc"
+          "detail": "/forkline-real-agent/networkx/networkx/readwrite/json_graph/tests/__pycache__/test_adjacency.cpython-314-pytest-9.2.0.pyc.31141 -\u003e /forkline-real-agent/networkx/networkx/readwrite/json_graph/tests/__pycache__/test_adjacency.cpython-314-pytest-9.2.0.pyc"
         },
         {
           "ts": "2026-11-05T21:43:02.943072935Z",
@@ -11606,7 +11606,7 @@
           "offset_ms": 19200,
           "type": "file_rename",
           "pid": 31141,
-          "detail": "/agentloupe-real-agent/networkx/networkx/readwrite/tests/__pycache__/test_sparse6.cpython-314-pytest-9.2.0.pyc.31141 -\u003e /agentloupe-real-agent/networkx/networkx/readwrite/tests/__pycache__/test_sparse6.cpython-314-pytest-9.2.0.pyc"
+          "detail": "/forkline-real-agent/networkx/networkx/readwrite/tests/__pycache__/test_sparse6.cpython-314-pytest-9.2.0.pyc.31141 -\u003e /forkline-real-agent/networkx/networkx/readwrite/tests/__pycache__/test_sparse6.cpython-314-pytest-9.2.0.pyc"
         },
         {
           "ts": "2026-11-05T21:43:03.126429312Z",
@@ -11620,7 +11620,7 @@
           "offset_ms": 19292,
           "type": "file_rename",
           "pid": 31141,
-          "detail": "/agentloupe-real-agent/networkx/networkx/tests/__pycache__/test_lazy_imports.cpython-314-pytest-9.2.0.pyc.31141 -\u003e /agentloupe-real-agent/networkx/networkx/tests/__pycache__/test_lazy_imports.cpython-314-pytest-9.2.0.pyc"
+          "detail": "/forkline-real-agent/networkx/networkx/tests/__pycache__/test_lazy_imports.cpython-314-pytest-9.2.0.pyc.31141 -\u003e /forkline-real-agent/networkx/networkx/tests/__pycache__/test_lazy_imports.cpython-314-pytest-9.2.0.pyc"
         },
         {
           "ts": "2026-11-05T21:43:03.189072383Z",
@@ -11648,14 +11648,14 @@
           "offset_ms": 25080,
           "type": "file_open",
           "pid": 30952,
-          "detail": "/tmp/claude-1000/-tmp-agentloupe-real-agent-networkx/f7c4f0e9-fe83-41b7-b465-c95dfa00f419/tasks/b3n278hre.output flags=165888"
+          "detail": "/tmp/claude-1000/-tmp-forkline-real-agent-networkx/f7c4f0e9-fe83-41b7-b465-c95dfa00f419/tasks/b3n278hre.output flags=165888"
         },
         {
           "ts": "2026-11-05T21:43:14.952201855Z",
           "offset_ms": 31089,
           "type": "file_open",
           "pid": 30952,
-          "detail": "/tmp/claude-1000/-tmp-agentloupe-real-agent-networkx/f7c4f0e9-fe83-41b7-b465-c95dfa00f419/tasks/b3n278hre.output flags=165888"
+          "detail": "/tmp/claude-1000/-tmp-forkline-real-agent-networkx/f7c4f0e9-fe83-41b7-b465-c95dfa00f419/tasks/b3n278hre.output flags=165888"
         },
         {
           "ts": "2026-11-05T21:43:15.975364531Z",
@@ -11669,7 +11669,7 @@
           "offset_ms": 43103,
           "type": "file_open",
           "pid": 30952,
-          "detail": "/tmp/claude-1000/-tmp-agentloupe-real-agent-networkx/f7c4f0e9-fe83-41b7-b465-c95dfa00f419/tasks/b3n278hre.output flags=165888"
+          "detail": "/tmp/claude-1000/-tmp-forkline-real-agent-networkx/f7c4f0e9-fe83-41b7-b465-c95dfa00f419/tasks/b3n278hre.output flags=165888"
         },
         {
           "ts": "2026-11-05T21:43:34.59390149Z",
@@ -41544,9 +41544,9 @@
           "argv": [
             "/bin/sh",
             "-c",
-            "python3 /u/demo/dev-inframatrix/AgentLoupe/hooks/agentloupe_hook.py"
+            "python3 /u/demo/dev-inframatrix/forkline/hooks/forkline_hook.py"
           ],
-          "command": "python3 /u/demo/dev-inframatrix/AgentLoupe/hooks/agentloupe_hook.py",
+          "command": "python3 /u/demo/dev-inframatrix/forkline/hooks/forkline_hook.py",
           "start": "2026-11-05T21:42:46.962295397Z",
           "end": "2026-11-05T21:42:46.981741555Z",
           "start_ms": 3100,
@@ -41590,7 +41590,7 @@
               "count": 2
             },
             {
-              "path": "/u/demo/dev-inframatrix/AgentLoupe/hooks/agentloupe_hook.py",
+              "path": "/u/demo/dev-inframatrix/forkline/hooks/forkline_hook.py",
               "count": 2
             },
             {
@@ -41614,7 +41614,7 @@
               "count": 2
             },
             {
-              "path": "/u/demo/dev-inframatrix/AgentLoupe/hooks",
+              "path": "/u/demo/dev-inframatrix/forkline/hooks",
               "count": 1
             },
             {
@@ -41627,7 +41627,7 @@
             }
           ],
           "notes": [
-            "AgentLoupe hook process: observation overhead, not agent work"
+            "Forkline hook process: observation overhead, not agent work"
           ]
         },
         {
@@ -41843,13 +41843,13 @@
             "/g43rz5u3",
             "/tmp/tmpz5dn37pl/pip-25.1.1-py3-none-any.whl",
             "/upqn0_qd",
-            "/agentloupe-real-agent/networkx/.venv/lib/python3.14/site-packages/pip/__pycache__/__init__.cpython-314.pyc.140154474013808",
-            "/agentloupe-real-agent/networkx/.venv/lib/python3.14/site-packages/pip/__pycache__/__init__.cpython-314.pyc",
-            "/agentloupe-real-agent/networkx/.venv/lib/python3.14/site-packages/pip/__pycache__/__main__.cpython-314.pyc.140154474013968",
-            "/agentloupe-real-agent/networkx/.venv/lib/python3.14/site-packages/pip/__pycache__/__main__.cpython-314.pyc",
-            "/agentloupe-real-agent/networkx/.venv/lib/python3.14/site-packages/pip/__pycache__/__pip-runner__.cpython-314.pyc.140154474014288",
-            "/agentloupe-real-agent/networkx/.venv/lib/python3.14/site-packages/pip/__pycache__/__pip-runner__.cpython-314.pyc",
-            "/agentloupe-real-agent/networkx/.venv/lib/python3.14/site-packages/pip/_internal/__pycache__/__init__.cpython-314.pyc.140154474296608"
+            "/forkline-real-agent/networkx/.venv/lib/python3.14/site-packages/pip/__pycache__/__init__.cpython-314.pyc.140154474013808",
+            "/forkline-real-agent/networkx/.venv/lib/python3.14/site-packages/pip/__pycache__/__init__.cpython-314.pyc",
+            "/forkline-real-agent/networkx/.venv/lib/python3.14/site-packages/pip/__pycache__/__main__.cpython-314.pyc.140154474013968",
+            "/forkline-real-agent/networkx/.venv/lib/python3.14/site-packages/pip/__pycache__/__main__.cpython-314.pyc",
+            "/forkline-real-agent/networkx/.venv/lib/python3.14/site-packages/pip/__pycache__/__pip-runner__.cpython-314.pyc.140154474014288",
+            "/forkline-real-agent/networkx/.venv/lib/python3.14/site-packages/pip/__pycache__/__pip-runner__.cpython-314.pyc",
+            "/forkline-real-agent/networkx/.venv/lib/python3.14/site-packages/pip/_internal/__pycache__/__init__.cpython-314.pyc.140154474296608"
           ]
         },
         {
@@ -42101,9 +42101,9 @@
           "argv": [
             "/bin/sh",
             "-c",
-            "python3 /u/demo/dev-inframatrix/AgentLoupe/hooks/agentloupe_hook.py"
+            "python3 /u/demo/dev-inframatrix/forkline/hooks/forkline_hook.py"
           ],
-          "command": "python3 /u/demo/dev-inframatrix/AgentLoupe/hooks/agentloupe_hook.py",
+          "command": "python3 /u/demo/dev-inframatrix/forkline/hooks/forkline_hook.py",
           "start": "2026-11-05T21:42:50.023659746Z",
           "end": "2026-11-05T21:42:50.038733662Z",
           "start_ms": 6161,
@@ -42147,7 +42147,7 @@
               "count": 2
             },
             {
-              "path": "/u/demo/dev-inframatrix/AgentLoupe/hooks/agentloupe_hook.py",
+              "path": "/u/demo/dev-inframatrix/forkline/hooks/forkline_hook.py",
               "count": 2
             },
             {
@@ -42171,7 +42171,7 @@
               "count": 2
             },
             {
-              "path": "/u/demo/dev-inframatrix/AgentLoupe/hooks",
+              "path": "/u/demo/dev-inframatrix/forkline/hooks",
               "count": 1
             },
             {
@@ -42184,7 +42184,7 @@
             }
           ],
           "notes": [
-            "AgentLoupe hook process: observation overhead, not agent work"
+            "Forkline hook process: observation overhead, not agent work"
           ]
         },
         {
@@ -42203,9 +42203,9 @@
           "argv": [
             "/bin/sh",
             "-c",
-            "python3 /u/demo/dev-inframatrix/AgentLoupe/hooks/agentloupe_hook.py"
+            "python3 /u/demo/dev-inframatrix/forkline/hooks/forkline_hook.py"
           ],
-          "command": "python3 /u/demo/dev-inframatrix/AgentLoupe/hooks/agentloupe_hook.py",
+          "command": "python3 /u/demo/dev-inframatrix/forkline/hooks/forkline_hook.py",
           "start": "2026-11-05T21:42:52.895002388Z",
           "end": "2026-11-05T21:42:52.913538265Z",
           "start_ms": 9032,
@@ -42249,7 +42249,7 @@
               "count": 2
             },
             {
-              "path": "/u/demo/dev-inframatrix/AgentLoupe/hooks/agentloupe_hook.py",
+              "path": "/u/demo/dev-inframatrix/forkline/hooks/forkline_hook.py",
               "count": 2
             },
             {
@@ -42273,7 +42273,7 @@
               "count": 2
             },
             {
-              "path": "/u/demo/dev-inframatrix/AgentLoupe/hooks",
+              "path": "/u/demo/dev-inframatrix/forkline/hooks",
               "count": 1
             },
             {
@@ -42286,7 +42286,7 @@
             }
           ],
           "notes": [
-            "AgentLoupe hook process: observation overhead, not agent work"
+            "Forkline hook process: observation overhead, not agent work"
           ]
         },
         {
@@ -42399,15 +42399,15 @@
           ],
           "mutated_paths": [
             "/_96p3w6z",
-            "/agentloupe-real-agent/networkx/networkx/__pycache__/__init__.cpython-314.pyc.134178124091184",
-            "/agentloupe-real-agent/networkx/networkx/__pycache__/__init__.cpython-314.pyc",
-            "/agentloupe-real-agent/networkx/networkx/__pycache__/lazy_imports.cpython-314.pyc.134178124092208",
-            "/agentloupe-real-agent/networkx/networkx/__pycache__/lazy_imports.cpython-314.pyc",
-            "/agentloupe-real-agent/networkx/networkx/__pycache__/exception.cpython-314.pyc.134178124399152",
-            "/agentloupe-real-agent/networkx/networkx/__pycache__/exception.cpython-314.pyc",
-            "/agentloupe-real-agent/networkx/networkx/utils/__pycache__/__init__.cpython-314.pyc.134178124402736",
-            "/agentloupe-real-agent/networkx/networkx/utils/__pycache__/__init__.cpython-314.pyc",
-            "/agentloupe-real-agent/networkx/networkx/utils/__pycache__/misc.cpython-314.pyc.134178124101552"
+            "/forkline-real-agent/networkx/networkx/__pycache__/__init__.cpython-314.pyc.134178124091184",
+            "/forkline-real-agent/networkx/networkx/__pycache__/__init__.cpython-314.pyc",
+            "/forkline-real-agent/networkx/networkx/__pycache__/lazy_imports.cpython-314.pyc.134178124092208",
+            "/forkline-real-agent/networkx/networkx/__pycache__/lazy_imports.cpython-314.pyc",
+            "/forkline-real-agent/networkx/networkx/__pycache__/exception.cpython-314.pyc.134178124399152",
+            "/forkline-real-agent/networkx/networkx/__pycache__/exception.cpython-314.pyc",
+            "/forkline-real-agent/networkx/networkx/utils/__pycache__/__init__.cpython-314.pyc.134178124402736",
+            "/forkline-real-agent/networkx/networkx/utils/__pycache__/__init__.cpython-314.pyc",
+            "/forkline-real-agent/networkx/networkx/utils/__pycache__/misc.cpython-314.pyc.134178124101552"
           ]
         },
         {
@@ -42426,9 +42426,9 @@
           "argv": [
             "/bin/sh",
             "-c",
-            "python3 /u/demo/dev-inframatrix/AgentLoupe/hooks/agentloupe_hook.py"
+            "python3 /u/demo/dev-inframatrix/forkline/hooks/forkline_hook.py"
           ],
-          "command": "python3 /u/demo/dev-inframatrix/AgentLoupe/hooks/agentloupe_hook.py",
+          "command": "python3 /u/demo/dev-inframatrix/forkline/hooks/forkline_hook.py",
           "start": "2026-11-05T21:42:53.562163131Z",
           "end": "2026-11-05T21:42:53.580177323Z",
           "start_ms": 9699,
@@ -42472,7 +42472,7 @@
               "count": 2
             },
             {
-              "path": "/u/demo/dev-inframatrix/AgentLoupe/hooks/agentloupe_hook.py",
+              "path": "/u/demo/dev-inframatrix/forkline/hooks/forkline_hook.py",
               "count": 2
             },
             {
@@ -42496,7 +42496,7 @@
               "count": 2
             },
             {
-              "path": "/u/demo/dev-inframatrix/AgentLoupe/hooks",
+              "path": "/u/demo/dev-inframatrix/forkline/hooks",
               "count": 1
             },
             {
@@ -42509,7 +42509,7 @@
             }
           ],
           "notes": [
-            "AgentLoupe hook process: observation overhead, not agent work"
+            "Forkline hook process: observation overhead, not agent work"
           ]
         },
         {
@@ -42528,9 +42528,9 @@
           "argv": [
             "/bin/sh",
             "-c",
-            "python3 /u/demo/dev-inframatrix/AgentLoupe/hooks/agentloupe_hook.py"
+            "python3 /u/demo/dev-inframatrix/forkline/hooks/forkline_hook.py"
           ],
-          "command": "python3 /u/demo/dev-inframatrix/AgentLoupe/hooks/agentloupe_hook.py",
+          "command": "python3 /u/demo/dev-inframatrix/forkline/hooks/forkline_hook.py",
           "start": "2026-11-05T21:42:56.433617583Z",
           "end": "2026-11-05T21:42:56.450867297Z",
           "start_ms": 12571,
@@ -42574,7 +42574,7 @@
               "count": 2
             },
             {
-              "path": "/u/demo/dev-inframatrix/AgentLoupe/hooks/agentloupe_hook.py",
+              "path": "/u/demo/dev-inframatrix/forkline/hooks/forkline_hook.py",
               "count": 2
             },
             {
@@ -42598,7 +42598,7 @@
               "count": 2
             },
             {
-              "path": "/u/demo/dev-inframatrix/AgentLoupe/hooks",
+              "path": "/u/demo/dev-inframatrix/forkline/hooks",
               "count": 1
             },
             {
@@ -42611,7 +42611,7 @@
             }
           ],
           "notes": [
-            "AgentLoupe hook process: observation overhead, not agent work"
+            "Forkline hook process: observation overhead, not agent work"
           ]
         },
         {
@@ -42689,9 +42689,9 @@
           "argv": [
             "/bin/sh",
             "-c",
-            "python3 /u/demo/dev-inframatrix/AgentLoupe/hooks/agentloupe_hook.py"
+            "python3 /u/demo/dev-inframatrix/forkline/hooks/forkline_hook.py"
           ],
-          "command": "python3 /u/demo/dev-inframatrix/AgentLoupe/hooks/agentloupe_hook.py",
+          "command": "python3 /u/demo/dev-inframatrix/forkline/hooks/forkline_hook.py",
           "start": "2026-11-05T21:42:56.459430996Z",
           "end": "2026-11-05T21:42:56.475443791Z",
           "start_ms": 12597,
@@ -42735,7 +42735,7 @@
               "count": 2
             },
             {
-              "path": "/u/demo/dev-inframatrix/AgentLoupe/hooks/agentloupe_hook.py",
+              "path": "/u/demo/dev-inframatrix/forkline/hooks/forkline_hook.py",
               "count": 2
             },
             {
@@ -42759,7 +42759,7 @@
               "count": 2
             },
             {
-              "path": "/u/demo/dev-inframatrix/AgentLoupe/hooks",
+              "path": "/u/demo/dev-inframatrix/forkline/hooks",
               "count": 1
             },
             {
@@ -42772,7 +42772,7 @@
             }
           ],
           "notes": [
-            "AgentLoupe hook process: observation overhead, not agent work"
+            "Forkline hook process: observation overhead, not agent work"
           ]
         },
         {
@@ -42791,9 +42791,9 @@
           "argv": [
             "/bin/sh",
             "-c",
-            "python3 /u/demo/dev-inframatrix/AgentLoupe/hooks/agentloupe_hook.py"
+            "python3 /u/demo/dev-inframatrix/forkline/hooks/forkline_hook.py"
           ],
-          "command": "python3 /u/demo/dev-inframatrix/AgentLoupe/hooks/agentloupe_hook.py",
+          "command": "python3 /u/demo/dev-inframatrix/forkline/hooks/forkline_hook.py",
           "start": "2026-11-05T21:42:57.419139979Z",
           "end": "2026-11-05T21:42:57.440644664Z",
           "start_ms": 13556,
@@ -42837,7 +42837,7 @@
               "count": 2
             },
             {
-              "path": "/u/demo/dev-inframatrix/AgentLoupe/hooks/agentloupe_hook.py",
+              "path": "/u/demo/dev-inframatrix/forkline/hooks/forkline_hook.py",
               "count": 2
             },
             {
@@ -42861,7 +42861,7 @@
               "count": 2
             },
             {
-              "path": "/u/demo/dev-inframatrix/AgentLoupe/hooks",
+              "path": "/u/demo/dev-inframatrix/forkline/hooks",
               "count": 1
             },
             {
@@ -42874,7 +42874,7 @@
             }
           ],
           "notes": [
-            "AgentLoupe hook process: observation overhead, not agent work"
+            "Forkline hook process: observation overhead, not agent work"
           ]
         },
         {
@@ -42941,8 +42941,8 @@
           ],
           "mutated_paths": [
             "/work/networkx/networkx/algorithms/shortest_paths/weighted.py.tmp.30952.721e3b308b3b",
-            "/agentloupe-real-agent/networkx/networkx/algorithms/shortest_paths/weighted.py.tmp.30952.721e3b308b3b",
-            "/agentloupe-real-agent/networkx/networkx/algorithms/shortest_paths/weighted.py"
+            "/forkline-real-agent/networkx/networkx/algorithms/shortest_paths/weighted.py.tmp.30952.721e3b308b3b",
+            "/forkline-real-agent/networkx/networkx/algorithms/shortest_paths/weighted.py"
           ],
           "notes": [
             "no child process: resources are the agent process's own file/network events inside the pre-\u003epost window (approximate: concurrent in-process work in that window is included; CPU and syscalls cannot be split by window and stay in agent_self)"
@@ -42964,9 +42964,9 @@
           "argv": [
             "/bin/sh",
             "-c",
-            "python3 /u/demo/dev-inframatrix/AgentLoupe/hooks/agentloupe_hook.py"
+            "python3 /u/demo/dev-inframatrix/forkline/hooks/forkline_hook.py"
           ],
-          "command": "python3 /u/demo/dev-inframatrix/AgentLoupe/hooks/agentloupe_hook.py",
+          "command": "python3 /u/demo/dev-inframatrix/forkline/hooks/forkline_hook.py",
           "start": "2026-11-05T21:42:57.449473745Z",
           "end": "2026-11-05T21:42:57.468344788Z",
           "start_ms": 13587,
@@ -43010,7 +43010,7 @@
               "count": 2
             },
             {
-              "path": "/u/demo/dev-inframatrix/AgentLoupe/hooks/agentloupe_hook.py",
+              "path": "/u/demo/dev-inframatrix/forkline/hooks/forkline_hook.py",
               "count": 2
             },
             {
@@ -43034,7 +43034,7 @@
               "count": 2
             },
             {
-              "path": "/u/demo/dev-inframatrix/AgentLoupe/hooks",
+              "path": "/u/demo/dev-inframatrix/forkline/hooks",
               "count": 1
             },
             {
@@ -43047,7 +43047,7 @@
             }
           ],
           "notes": [
-            "AgentLoupe hook process: observation overhead, not agent work"
+            "Forkline hook process: observation overhead, not agent work"
           ]
         },
         {
@@ -43066,9 +43066,9 @@
           "argv": [
             "/bin/sh",
             "-c",
-            "python3 /u/demo/dev-inframatrix/AgentLoupe/hooks/agentloupe_hook.py"
+            "python3 /u/demo/dev-inframatrix/forkline/hooks/forkline_hook.py"
           ],
-          "command": "python3 /u/demo/dev-inframatrix/AgentLoupe/hooks/agentloupe_hook.py",
+          "command": "python3 /u/demo/dev-inframatrix/forkline/hooks/forkline_hook.py",
           "start": "2026-11-05T21:42:59.902549072Z",
           "end": "2026-11-05T21:42:59.916830497Z",
           "start_ms": 16040,
@@ -43112,7 +43112,7 @@
               "count": 2
             },
             {
-              "path": "/u/demo/dev-inframatrix/AgentLoupe/hooks/agentloupe_hook.py",
+              "path": "/u/demo/dev-inframatrix/forkline/hooks/forkline_hook.py",
               "count": 2
             },
             {
@@ -43136,7 +43136,7 @@
               "count": 2
             },
             {
-              "path": "/u/demo/dev-inframatrix/AgentLoupe/hooks",
+              "path": "/u/demo/dev-inframatrix/forkline/hooks",
               "count": 1
             },
             {
@@ -43149,7 +43149,7 @@
             }
           ],
           "notes": [
-            "AgentLoupe hook process: observation overhead, not agent work"
+            "Forkline hook process: observation overhead, not agent work"
           ]
         },
         {
@@ -43264,16 +43264,16 @@
             }
           ],
           "mutated_paths": [
-            "/agentloupe-real-agent/networkx/.git/index.lock",
-            "/agentloupe-real-agent/networkx/.git/index",
+            "/forkline-real-agent/networkx/.git/index.lock",
+            "/forkline-real-agent/networkx/.git/index",
             "/l1gs8pwm",
-            "/agentloupe-real-agent/networkx/networkx/algorithms/shortest_paths/__pycache__/weighted.cpython-314.pyc.135891042052304",
-            "/agentloupe-real-agent/networkx/networkx/algorithms/shortest_paths/__pycache__/weighted.cpython-314.pyc",
+            "/forkline-real-agent/networkx/networkx/algorithms/shortest_paths/__pycache__/weighted.cpython-314.pyc.135891042052304",
+            "/forkline-real-agent/networkx/networkx/algorithms/shortest_paths/__pycache__/weighted.cpython-314.pyc",
             "/m9cg0bet",
-            "/agentloupe-real-agent/networkx/networkx/algorithms/approximation/tests/__pycache__/__init__.cpython-314.pyc.125170754929328",
-            "/agentloupe-real-agent/networkx/networkx/algorithms/approximation/tests/__pycache__/__init__.cpython-314.pyc",
-            "/agentloupe-real-agent/networkx/networkx/algorithms/approximation/tests/__pycache__/test_approx_clust_coeff.cpython-314-pytest-9.2.0.pyc.31141",
-            "/agentloupe-real-agent/networkx/networkx/algorithms/approximation/tests/__pycache__/test_approx_clust_coeff.cpython-314-pytest-9.2.0.pyc"
+            "/forkline-real-agent/networkx/networkx/algorithms/approximation/tests/__pycache__/__init__.cpython-314.pyc.125170754929328",
+            "/forkline-real-agent/networkx/networkx/algorithms/approximation/tests/__pycache__/__init__.cpython-314.pyc",
+            "/forkline-real-agent/networkx/networkx/algorithms/approximation/tests/__pycache__/test_approx_clust_coeff.cpython-314-pytest-9.2.0.pyc.31141",
+            "/forkline-real-agent/networkx/networkx/algorithms/approximation/tests/__pycache__/test_approx_clust_coeff.cpython-314-pytest-9.2.0.pyc"
           ]
         },
         {
@@ -43292,9 +43292,9 @@
           "argv": [
             "/bin/sh",
             "-c",
-            "python3 /u/demo/dev-inframatrix/AgentLoupe/hooks/agentloupe_hook.py"
+            "python3 /u/demo/dev-inframatrix/forkline/hooks/forkline_hook.py"
           ],
-          "command": "python3 /u/demo/dev-inframatrix/AgentLoupe/hooks/agentloupe_hook.py",
+          "command": "python3 /u/demo/dev-inframatrix/forkline/hooks/forkline_hook.py",
           "start": "2026-11-05T21:43:36.955386746Z",
           "end": "2026-11-05T21:43:36.97577504Z",
           "start_ms": 53093,
@@ -43338,7 +43338,7 @@
               "count": 2
             },
             {
-              "path": "/u/demo/dev-inframatrix/AgentLoupe/hooks/agentloupe_hook.py",
+              "path": "/u/demo/dev-inframatrix/forkline/hooks/forkline_hook.py",
               "count": 2
             },
             {
@@ -43362,7 +43362,7 @@
               "count": 2
             },
             {
-              "path": "/u/demo/dev-inframatrix/AgentLoupe/hooks",
+              "path": "/u/demo/dev-inframatrix/forkline/hooks",
               "count": 1
             },
             {
@@ -43375,7 +43375,7 @@
             }
           ],
           "notes": [
-            "AgentLoupe hook process: observation overhead, not agent work"
+            "Forkline hook process: observation overhead, not agent work"
           ]
         }
       ],
@@ -43439,7 +43439,7 @@
         },
         "top_files": [
           {
-            "path": "/tmp/claude-1000/-tmp-agentloupe-real-agent-networkx/f7c4f0e9-fe83-41b7-b465-c95dfa00f419/tasks/b3n278hre.output",
+            "path": "/tmp/claude-1000/-tmp-forkline-real-agent-networkx/f7c4f0e9-fe83-41b7-b465-c95dfa00f419/tasks/b3n278hre.output",
             "count": 43
           },
           {
@@ -43447,7 +43447,7 @@
             "count": 33
           },
           {
-            "path": "/u/demo/.claude/projects/-tmp-agentloupe-real-agent-networkx/f7c4f0e9-fe83-41b7-b465-c95dfa00f419.jsonl",
+            "path": "/u/demo/.claude/projects/-tmp-forkline-real-agent-networkx/f7c4f0e9-fe83-41b7-b465-c95dfa00f419.jsonl",
             "count": 22
           },
           {
@@ -43608,7 +43608,7 @@
             "--hidden",
             "/work/networkx"
           ],
-          "cwd": "/agentloupe-real-agent/networkx",
+          "cwd": "/forkline-real-agent/networkx",
           "start": "2026-11-05T21:42:44.052324878Z",
           "end": "2026-11-05T21:42:44.058133344Z",
           "start_ms": 190,

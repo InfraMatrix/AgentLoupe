@@ -17,7 +17,7 @@ func TestHookScriptRecords(t *testing.T) {
 	if err != nil {
 		t.Skip("python3 not available")
 	}
-	script := filepath.Join("..", "..", "hooks", "agentloupe_hook.py")
+	script := filepath.Join("..", "..", "hooks", "forkline_hook.py")
 	out := filepath.Join(t.TempDir(), "run.spans.jsonl")
 	payloads := []string{
 		`{"hook_event_name":"PreToolUse","session_id":"s1","tool_name":"Bash","tool_use_id":"toolu_1","tool_input":{"command":"pytest -q","description":"run tests"}}`,
@@ -28,7 +28,7 @@ func TestHookScriptRecords(t *testing.T) {
 	}
 	for _, p := range payloads {
 		cmd := exec.Command(py, script)
-		cmd.Env = append(os.Environ(), "AGENTLOUPE_SPANS="+out)
+		cmd.Env = append(os.Environ(), "FORKLINE_SPANS="+out)
 		cmd.Stdin = strings.NewReader(p)
 		stdout, err := cmd.Output()
 		if err != nil {

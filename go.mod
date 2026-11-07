@@ -1,4 +1,4 @@
-module github.com/InfraMatrix/AgentLoupe
+module github.com/InfraMatrix/forkline
 
 go 1.23
 

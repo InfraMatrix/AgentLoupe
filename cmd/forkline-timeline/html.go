@@ -19,7 +19,7 @@ func renderHTML(w io.Writer, rep *Report) error {
 	// Keep the embedded JSON from closing the script element early.
 	data = []byte(strings.ReplaceAll(string(data), "</", `<\/`))
 	page := strings.Replace(htmlPage, "__DATA__", string(data), 1)
-	page = strings.Replace(page, "__TITLE__", html.EscapeString("AgentLoupe timeline "+rep.CaptureStart), 1)
+	page = strings.Replace(page, "__TITLE__", html.EscapeString("Forkline timeline "+rep.CaptureStart), 1)
 	_, err = fmt.Fprint(w, page)
 	return err
 }
@@ -44,7 +44,7 @@ table{border-collapse:collapse;margin:8px 0 16px;font-size:13px} th,td{border:1p
 .legend{display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:var(--ink2)} .sw{display:inline-block;width:10px;height:10px;margin-right:4px;border-radius:2px}
 text{fill:var(--ink)} .muted{fill:var(--muted)} .lbl{font-size:11px} .hdr{font-size:12px;font-weight:600}
 </style></head><body>
-<h1>AgentLoupe timeline</h1>
+<h1>Forkline timeline</h1>
 <div class="sub" id="cap"></div>
 <div id="notes"></div>
 <div class="controls">

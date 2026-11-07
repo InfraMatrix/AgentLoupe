@@ -29,7 +29,7 @@ func captureMetaRecord(wallBase time.Time, realNow time.Time, monoNowNS int64, p
 		Ts:   wallBase.Add(time.Duration(monoNowNS)).UTC().Format(time.RFC3339Nano),
 		Type: CaptureMetaType,
 		Fields: map[string]any{
-			"abi_version":       8,
+			"abi_version":       abiVersion,
 			"clock":             "CLOCK_MONOTONIC",
 			"ts_formula":        "wall_base_unix_ns + bpf_ktime_get_ns",
 			"wall_base":         wallBase.UTC().Format(time.RFC3339Nano),

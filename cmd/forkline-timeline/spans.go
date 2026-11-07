@@ -161,7 +161,7 @@ type ToolSpan struct {
 	// precise (concurrent in-process work in that window is included);
 	// "remainder" is agent_self.
 	Attribution string `json:"attribution"`
-	// Role "hook" marks the AgentLoupe hook's own processes (overhead of
+	// Role "hook" marks the Forkline hook's own processes (overhead of
 	// observation, not agent work).
 	Role              string         `json:"role,omitempty"`
 	ToolName          string         `json:"tool_name,omitempty"`

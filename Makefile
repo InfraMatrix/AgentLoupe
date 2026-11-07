@@ -1,8 +1,8 @@
-# AgentLoupe — build orchestration.
+# Forkline — build orchestration.
 #
 # Canonical targets:
-#   make build        Compile the BPF object, then build ./agentloupe.
-#   make bpf          Compile bpf/agentloupe.bpf.c -> bpf/agentloupe.bpf.o (CO-RE).
+#   make build        Compile the BPF object, then build ./forkline.
+#   make bpf          Compile bpf/forkline.bpf.c -> bpf/forkline.bpf.o (CO-RE).
 #   make test         Unit tests only: no kernel, no root (go test ./...).
 #   make integration  Real-kernel integration test. Run as: sudo make integration
 #   make demo-canned  Offline demo, no sudo: renders the scorecard, tool
@@ -12,7 +12,7 @@
 #                     run.sh: Claude Code fixes a NetworkX bug under the
 #                     loader + hooks). Needs sudo, network, claude CLI.
 #   make demo         One-command live demo (scripts/demo.sh): builds, runs
-#                     the loader with configs/loupe-demo.yaml, runs the demo
+#                     the loader with configs/forkline-demo.yaml, runs the demo
 #                     workload, renders scorecard/timeline/HTML. Prompts for
 #                     sudo once.
 #
@@ -37,13 +37,13 @@ BPFTOOL ?= bpftool
 
 .PHONY: build
 build: bpf
-	$(GO) build -o agentloupe ./cmd/agentloupe
+	$(GO) build -o forkline ./cmd/forkline
 
-bpf/agentloupe.bpf.o: bpf/agentloupe.bpf.c bpf/agentloupe.h bpf/scope.h bpf/vmlinux.h check-lsm-returns
+bpf/forkline.bpf.o: bpf/forkline.bpf.c bpf/forkline.h bpf/scope.h bpf/vmlinux.h check-lsm-returns
 	$(CLANG) $(BPF_CFLAGS) -c $< -o $@
 
 .PHONY: bpf
-bpf: bpf/agentloupe.bpf.o
+bpf: bpf/forkline.bpf.o
 
 .PHONY: test
 test:
@@ -70,12 +70,12 @@ CANNED ?= examples/canned
 .PHONY: demo-canned
 demo-canned:
 	@test -s $(CANNED)/capture.jsonl || { echo "demo-canned: $(CANNED)/capture.jsonl missing"; exit 1; }
-	$(GO) build -o loupe-scorecard ./cmd/loupe-scorecard
-	$(GO) build -o loupe-timeline ./cmd/loupe-timeline
+	$(GO) build -o forkline-scorecard ./cmd/forkline-scorecard
+	$(GO) build -o forkline-timeline ./cmd/forkline-timeline
 	@printf '\n== Scorecard (%s) ==\n' "$(CANNED)/capture.jsonl"
-	./loupe-scorecard $(CANNED)/capture.jsonl
+	./forkline-scorecard $(CANNED)/capture.jsonl
 	@printf '\n== Tool spans (harness: %s) ==\n' "$(CANNED)/capture.spans.jsonl"
-	./loupe-timeline --tool-spans --spans $(CANNED)/capture.spans.jsonl $(CANNED)/capture.jsonl
+	./forkline-timeline --tool-spans --spans $(CANNED)/capture.spans.jsonl $(CANNED)/capture.jsonl
 	@printf '\n== AgentCutter analysis (%s) ==\n' "$(CANNED)/analysis.md"
 	@cat $(CANNED)/analysis.md
 
@@ -85,7 +85,7 @@ real-agent:
 
 .PHONY: clean
 clean:
-	rm -f agentloupe bpf/agentloupe.bpf.o
+	rm -f forkline bpf/forkline.bpf.o
 
 .PHONY: check-header
 check-header:
@@ -99,14 +99,14 @@ check-header:
 	  '#define BPF_MAP_TYPE_HASH 1' '#define BPF_MAP_TYPE_LRU_HASH 2' \
 	  '#define BPF_MAP_TYPE_ARRAY 3' '#define BPF_MAP_TYPE_PERCPU_ARRAY 4' \
 	  '#define BPF_MAP_TYPE_RINGBUF 5' \
-	  '#include "agentloupe.h"' \
-	  'int main(void) { return 0; }' > /tmp/agentloupe_header_check.c
-	$(CLANG) -std=c11 -Wall -Wextra -Werror -I bpf -fsyntax-only /tmp/agentloupe_header_check.c
+	  '#include "forkline.h"' \
+	  'int main(void) { return 0; }' > /tmp/forkline_header_check.c
+	$(CLANG) -std=c11 -Wall -Wextra -Werror -I bpf -fsyntax-only /tmp/forkline_header_check.c
 	@echo "check-header: OK (all _Static_asserts hold)"
 
 .PHONY: check-lsm-returns
 check-lsm-returns:
-	python3 scripts/check_lsm_returns.py bpf/agentloupe.bpf.c
+	python3 scripts/check_lsm_returns.py bpf/forkline.bpf.c
 
 # Proof the checker catches the bad case, not just that it runs: it must
 # REJECT the -EPERM fixture and ACCEPT the real source.
@@ -118,8 +118,8 @@ check-lsm-returns-selftest:
 	else \
 		echo "selftest: OK — bad fixture rejected as expected"; \
 	fi
-	@echo "selftest: checker must accept bpf/agentloupe.bpf.c ..."
-	python3 scripts/check_lsm_returns.py bpf/agentloupe.bpf.c
+	@echo "selftest: checker must accept bpf/forkline.bpf.c ..."
+	python3 scripts/check_lsm_returns.py bpf/forkline.bpf.c
 	@echo "check-lsm-returns-selftest: OK"
 
 .PHONY: check-tracked-files

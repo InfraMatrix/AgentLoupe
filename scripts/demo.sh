@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# AgentLoupe one-command demo.
+# Forkline one-command demo.
 #
 # Builds everything, checks prerequisites, runs the loader against
-# configs/loupe-demo.yaml (the loupe_demo python workload, tracked at
-# examples/loupe_demo.py) plus `--catalog-only claude-code`, runs the
+# configs/forkline-demo.yaml (the forkline_demo python workload, tracked at
+# examples/forkline_demo.py) plus `--catalog-only claude-code`, runs the
 # demo workload twice, then renders the scorecard, the text timeline,
 # and an HTML timeline. The catalog rule is a no-op on hosts without
 # Claude Code installed; if a Claude Code session is already running
@@ -24,8 +24,8 @@ LOADER_LOG="${LOADER_LOG:-demo-loader.log}"
 TIMELINE_TXT="${TIMELINE_TXT:-demo-timeline.txt}"
 TIMELINE_HTML="${TIMELINE_HTML:-timeline-demo.html}"
 MAX_RUNTIME="${MAX_RUNTIME:-45s}"
-DEMO_WORKLOAD="examples/loupe_demo.py"
-DEMO_CONFIG="configs/loupe-demo.yaml"
+DEMO_WORKLOAD="examples/forkline_demo.py"
+DEMO_CONFIG="configs/forkline-demo.yaml"
 
 say()  { printf '\n== %s ==\n' "$*"; }
 info() { printf 'demo: %s\n' "$*"; }
@@ -33,7 +33,7 @@ die()  { printf 'demo: ERROR: %s\n' "$*" >&2; exit 1; }
 
 # ---------------------------------------------------------------- prereqs
 say "Checking prerequisites"
-[ "$(uname -s)" = "Linux" ] || die "AgentLoupe is Linux-only"
+[ "$(uname -s)" = "Linux" ] || die "Forkline is Linux-only"
 for tool in go clang python3 sudo; do
   command -v "$tool" >/dev/null 2>&1 || die "missing tool: $tool (see README 'Required toolchain')"
 done
@@ -67,8 +67,8 @@ sudo -v || die "sudo authentication failed"
 # ------------------------------------------------------------------ build
 say "Building (as your user; only the loader run uses sudo)"
 make build
-go build -o loupe-timeline ./cmd/loupe-timeline
-go build -o loupe-scorecard ./cmd/loupe-scorecard
+go build -o forkline-timeline ./cmd/forkline-timeline
+go build -o forkline-scorecard ./cmd/forkline-scorecard
 
 # ----------------------------------------------------------------- loader
 say "Starting loader ($MAX_RUNTIME window, log: $LOADER_LOG)"
@@ -79,11 +79,11 @@ fi
 # --catalog-only claude-code: the built-in catalog resolves the
 # invoking (SUDO_USER) user's per-user install and silently skips the
 # rule when Claude Code is not installed, so this works on any host.
-# The demo config itself only carries the loupe_demo workload rule.
-sudo ./agentloupe \
+# The demo config itself only carries the forkline_demo workload rule.
+sudo ./forkline \
   --config "$DEMO_CONFIG" \
   --catalog-only claude-code \
-  --bpf-object bpf/agentloupe.bpf.o \
+  --bpf-object bpf/forkline.bpf.o \
   --enable-syscall-summary \
   --output "$CAPTURE" \
   --max-runtime "$MAX_RUNTIME" \
@@ -129,13 +129,13 @@ grep '"type":"session_end"' "$CAPTURE" | grep -o '"reason":"[a-z_]*"' | sort | u
 
 # ---------------------------------------------------------------- renders
 say "Scorecard"
-./loupe-scorecard "$CAPTURE"
+./forkline-scorecard "$CAPTURE"
 
 say "Timeline (full text in $TIMELINE_TXT)"
-./loupe-timeline "$CAPTURE" > "$TIMELINE_TXT"
+./forkline-timeline "$CAPTURE" > "$TIMELINE_TXT"
 head -40 "$TIMELINE_TXT"
 
-./loupe-timeline --html "$TIMELINE_HTML" "$CAPTURE" >/dev/null
+./forkline-timeline --html "$TIMELINE_HTML" "$CAPTURE" >/dev/null
 info "HTML timeline: $TIMELINE_HTML (open in any browser, works offline)"
 info "loader log:     $LOADER_LOG"
 info "raw capture:    $CAPTURE"

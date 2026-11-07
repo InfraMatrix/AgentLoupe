@@ -16,10 +16,10 @@ import (
 	"github.com/cilium/ebpf"
 	"golang.org/x/sys/unix"
 
-	"github.com/InfraMatrix/AgentLoupe/internal/config"
+	"github.com/InfraMatrix/forkline/internal/config"
 )
 
-// ---- kernel ABI byte encodings (must mirror bpf/agentloupe.h) ----
+// ---- kernel ABI byte encodings (must mirror bpf/forkline.h) ----
 
 func binaryKey(dev uint32, ino uint64) (key [16]byte) {
 	binary.LittleEndian.PutUint32(key[0:4], dev)
@@ -236,7 +236,7 @@ func (l *Loader) setConfig(ioAccounting, syscallSummary, fileMutations, fileRWEv
 	key0 := uint32(0)
 	val := make([]byte, configSize)
 	binary.LittleEndian.PutUint64(val[0:8], l.runID)
-	// struct agentloupe_config: run_id, enable_syscall_summary,
+	// struct forkline_config: run_id, enable_syscall_summary,
 	// enable_file_io_accounting, enable_file_mutations, net_udp_only,
 	// enable_file_rw_events, enable_net_send_events (header order).
 	// 32 bytes, fully used since ABI v6 (slot 6 took the tail pad;
@@ -255,7 +255,7 @@ func (l *Loader) setConfig(ioAccounting, syscallSummary, fileMutations, fileRWEv
 	return m.Update(&key0, &val, ebpf.UpdateAny)
 }
 
-// struct agentloupe_config: 40 bytes since ABI v9. Field offsets used by
+// struct forkline_config: 40 bytes since ABI v9. Field offsets used by
 // setConfigFlag.
 const (
 	configSize             = 40

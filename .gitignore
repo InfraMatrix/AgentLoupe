@@ -1,10 +1,10 @@
-# AgentLoupe — Go + eBPF. All patterns are anchored to specific paths so
+# Forkline — Go + eBPF. All patterns are anchored to specific paths so
 # they can never shadow source directories or go.mod/go.sum.
 
 # Built binaries (make build / go build -o)
-/agentloupe
-/loupe-scorecard
-/loupe-timeline
+/forkline
+/forkline-scorecard
+/forkline-timeline
 
 # Compiled BPF objects, generated next to their sources by `make bpf`
 /bpf/*.o

@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/InfraMatrix/AgentLoupe/internal/config"
+	"github.com/InfraMatrix/forkline/internal/config"
 )
 
 func TestSyscallNameFallback(t *testing.T) {

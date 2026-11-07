@@ -1,10 +1,10 @@
 /* SPDX-License-Identifier: (MIT OR GPL-2.0) */
 /*
- * agentloupe.h — shared contract between the eBPF programs and the Go loader.
+ * forkline.h — shared contract between the eBPF programs and the Go loader.
  *
  * Included by every .bpf.c after vmlinux.h and <bpf/bpf_helpers.h>.
  * If you change any struct here you change the ABI: bump
- * AGENTLOUPE_ABI_VERSION so the loader refuses a stale object instead of
+ * FORKLINE_ABI_VERSION so the loader refuses a stale object instead of
  * silently mis-decoding events.
  *
  * MINIMUM KERNEL — stated explicitly, enforced by the loader's startup
@@ -36,7 +36,7 @@
  *    bpf_ringbuf_reserve(&events, EVLEN_<TYPE>, 0).
  *  - Drops are counted per event type in a percpu array (no atomics on the
  *    hot path); failed map updates (map full) are counted separately in
- *    struct agentloupe_counters and surfaced alongside ring drops.
+ *    struct forkline_counters and surfaced alongside ring drops.
  *  - Session state lives in the KERNEL (sessions map), not in userspace
  *    scans. Rejecting or timing out a provisional session is one userspace
  *    map write (state = SESSION_REJECTED): the fork hook refuses to
@@ -53,15 +53,15 @@
  *    marked partial). Each path-bearing payload records HOW its path was
  *    obtained (enum path_source) and truncation sets EVENT_F_PATH_PARTIAL.
  */
-#ifndef AGENTLOUPE_H
-#define AGENTLOUPE_H
+#ifndef FORKLINE_H
+#define FORKLINE_H
 
-#define AGENTLOUPE_ABI_VERSION 9
+#define FORKLINE_ABI_VERSION 9
 
 /* Minimum kernel for full (LSM) mode; the loader enforces this, the
  * header only documents it. Fallback floor is 5.8. */
-#define AGENTLOUPE_MIN_FULL_MAJOR 5
-#define AGENTLOUPE_MIN_FULL_MINOR 11
+#define FORKLINE_MIN_FULL_MAJOR 5
+#define FORKLINE_MIN_FULL_MINOR 11
 
 /* ---- Bounds (compile-time, so memory use is known before load) --------- */
 #define MAX_TRACKED_SESSIONS 8192   /* entries in tracked_sessions        */
@@ -321,7 +321,7 @@ struct event_counters {
 /* Failures that are NOT ring-buffer drops, kept separate so "we are losing
  * visibility" is distinguishable from "the ring is undersized". Percpu,
  * single entry; userspace sums and exposes every field. */
-struct agentloupe_counters {
+struct forkline_counters {
 	__u64 tracked_updates_failed;     /* tracked_sessions full: a process
 	                                   * (possibly a whole subtree) is now
 	                                   * silently untracked — alert on this */
@@ -346,7 +346,7 @@ struct agentloupe_counters {
 };
 
 /* Runtime toggles, written by the loader; index 0 of the config map. */
-struct agentloupe_config {
+struct forkline_config {
 	__u64 run_id;                     /* echoed in every userspace record  */
 	__u32 enable_syscall_summary;     /* gates raw_syscalls:sys_enter body */
 	__u32 enable_file_io_accounting;  /* gates vfs_read/write(v) counting  */
@@ -392,7 +392,7 @@ struct agentloupe_config {
 struct event_hdr {
 	__u16 type;                       /* enum event_type                   */
 	__u16 size;                       /* total record size, incl. header   */
-	__u16 version;                    /* AGENTLOUPE_ABI_VERSION            */
+	__u16 version;                    /* FORKLINE_ABI_VERSION            */
 	__u16 flags;                      /* EVENT_F_*                         */
 	__u64 ts_ns;
 	__u64 session_id;
@@ -429,7 +429,7 @@ struct ev_fork {
 /*
  * Exit-time resource usage for the exiting thread group ("self": the
  * group's own threads, never its reaped children — see handle_exit in
- * agentloupe.bpf.c for which kernel fields these come from and why).
+ * forkline.bpf.c for which kernel fields these come from and why).
  * cpu_*_ns are thread-group CPU totals in nanoseconds; max_rss_kb is
  * the group's peak resident set size in KiB (the kernel's ru_maxrss
  * unit). Userspace converts the CPU fields to cpu_user_ms/cpu_sys_ms.
@@ -604,7 +604,7 @@ struct ev_net_connect {
 #define EVLEN_NET_SEND (sizeof(struct event_hdr) + sizeof(struct ev_net_send))
 #define EVLEN_NET_RECV (sizeof(struct event_hdr) + sizeof(struct ev_net_recv))
 
-/* Compile-time ABI guards: if any of these fire, bump AGENTLOUPE_ABI_VERSION
+/* Compile-time ABI guards: if any of these fire, bump FORKLINE_ABI_VERSION
  * and update the Go decoder in the same commit. `make check-header` verifies
  * them with a host compiler, no kernel or libbpf needed. */
 _Static_assert(sizeof(struct event_hdr) == 72, "event_hdr ABI changed");
@@ -616,7 +616,7 @@ _Static_assert(sizeof(struct ev_file_close) == 552, "ev_file_close ABI changed")
 _Static_assert(sizeof(struct ev_file_rw) == 552, "ev_file_rw ABI changed");
 _Static_assert(sizeof(struct ev_net_send) == 112, "ev_net_send ABI changed");
 _Static_assert(sizeof(struct ev_net_recv) == 120, "ev_net_recv ABI changed");
-_Static_assert(sizeof(struct agentloupe_config) == 40, "agentloupe_config ABI changed");
+_Static_assert(sizeof(struct forkline_config) == 40, "forkline_config ABI changed");
 _Static_assert(sizeof(struct comm_key) == 32, "comm_key ABI changed");
 _Static_assert(sizeof(struct session_info) == 88, "session_info ABI changed");
 _Static_assert(sizeof(struct tracked_session) == 8, "tracked_session ABI changed");
@@ -634,7 +634,7 @@ _Static_assert(sizeof(struct syscall_key) == 16, "syscall_key ABI changed");
  * entries against /proc. LRU would silently evict a live long-running
  * agent under fork pressure, which is worse than a bounded leak the
  * sweeper can see and count. A failed update (map full) increments
- * agentloupe_counters.tracked_updates_failed — that is a visibility loss,
+ * forkline_counters.tracked_updates_failed — that is a visibility loss,
  * not a drop, and must page like one. */
 struct {
 	__uint(type, BPF_MAP_TYPE_HASH);
@@ -706,7 +706,7 @@ struct {
 
 /* Optional per-(session, tgid, syscall) counts. LRU: eviction under
  * pressure loses the least-recently-used counter (a failed insert still
- * bumps syscall_updates_failed in agentloupe_counters). */
+ * bumps syscall_updates_failed in forkline_counters). */
 struct {
 	__uint(type, BPF_MAP_TYPE_LRU_HASH);
 	__uint(max_entries, MAX_SYSCALL_COUNTS);
@@ -723,12 +723,12 @@ struct {
 	__type(value, __u64);
 } session_counter SEC(".maps");
 
-/* Index 0: struct agentloupe_config. */
+/* Index 0: struct forkline_config. */
 struct {
 	__uint(type, BPF_MAP_TYPE_ARRAY);
 	__uint(max_entries, 1);
 	__type(key, __u32);
-	__type(value, struct agentloupe_config);
+	__type(value, struct forkline_config);
 } config_map SEC(".maps");
 
 /* Per-event-type emitted/drop counters, summed by userspace. */
@@ -739,12 +739,12 @@ struct {
 	__type(value, struct event_counters);
 } stats SEC(".maps");
 
-/* Map-full / lost-visibility counters (struct agentloupe_counters). */
+/* Map-full / lost-visibility counters (struct forkline_counters). */
 struct {
 	__uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
 	__uint(max_entries, 1);
 	__type(key, __u32);
-	__type(value, struct agentloupe_counters);
+	__type(value, struct forkline_counters);
 } counters SEC(".maps");
 
 /* Per-CPU dentry-walk scratch (struct path_scratch). */
@@ -841,4 +841,4 @@ struct {
 	__uint(max_entries, RINGBUF_BYTES);
 } events SEC(".maps");
 
-#endif /* AGENTLOUPE_H */
+#endif /* FORKLINE_H */

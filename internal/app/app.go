@@ -14,7 +14,7 @@ import (
 	"github.com/cilium/ebpf/link"
 	"github.com/cilium/ebpf/ringbuf"
 
-	"github.com/InfraMatrix/AgentLoupe/internal/config"
+	"github.com/InfraMatrix/forkline/internal/config"
 )
 
 type Options struct {
@@ -300,7 +300,7 @@ func Run(ctx context.Context, o Options) error {
 		return fmt.Errorf("orphan timeout must be >= 0 (0 = wait indefinitely), got %s", o.OrphanTimeout)
 	}
 	logf := func(format string, args ...any) {
-		fmt.Fprintf(os.Stderr, "agentloupe: "+format+"\n", args...)
+		fmt.Fprintf(os.Stderr, "forkline: "+format+"\n", args...)
 	}
 	lsmMode := featureProbe(logf, o.ForceTracepointMode)
 

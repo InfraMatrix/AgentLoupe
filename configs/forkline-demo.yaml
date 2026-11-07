@@ -8,12 +8,12 @@
 # resolves the SUDO_USER's home, and silently skips the entry when no
 # Claude Code install exists on the host.
 agents:
-  # Reliable demo: any `python3 ...loupe_demo...` process is confirmed
+  # Reliable demo: any `python3 ...forkline_demo...` process is confirmed
   # from argv (kernel matches the interpreter inode, userspace confirms
   # the marker, children inherit the session). The workload itself is
-  # tracked in the repo at examples/loupe_demo.py.
-  - name: loupe-demo-python
+  # tracked in the repo at examples/forkline_demo.py.
+  - name: forkline-demo-python
     kind: tool
     match:
       interpreter: /usr/bin/python3
-      argv_contains: loupe_demo
+      argv_contains: forkline_demo

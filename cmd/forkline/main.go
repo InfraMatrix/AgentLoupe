@@ -1,4 +1,4 @@
-// AgentLoupe dev-mode loader. Observe-only eBPF agent observability.
+// Forkline dev-mode loader. Observe-only eBPF agent observability.
 //
 // Dev-mode guarantees:
 //   - Nothing is ever pinned in bpffs; programs and links exist only as
@@ -17,7 +17,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/InfraMatrix/AgentLoupe/internal/app"
+	"github.com/InfraMatrix/forkline/internal/app"
 )
 
 type multiFlag []string
@@ -43,8 +43,8 @@ func (m *multiInt) Set(v string) error {
 func main() {
 	var o app.Options
 	var maxRuntime time.Duration
-	flag.StringVar(&o.BPFObject, "bpf-object", "bpf/agentloupe.bpf.o", "compiled CO-RE object")
-	flag.StringVar(&o.ConfigPath, "config", "/etc/agentloupe/agents.yaml", "agents.yaml path")
+	flag.StringVar(&o.BPFObject, "bpf-object", "bpf/forkline.bpf.o", "compiled CO-RE object")
+	flag.StringVar(&o.ConfigPath, "config", "/etc/forkline/agents.yaml", "agents.yaml path")
 	flag.StringVar(&o.Output, "output", "-", "JSONL output: file path or - for stdout")
 	flag.DurationVar(&maxRuntime, "max-runtime", 0, "stop automatically after this duration (0 = run until signal)")
 	flag.BoolVar(&o.EnableIOAccounting, "enable-io-accounting", false, "opt-in: fexit vfs_read/vfs_write{,v} byte accounting + file_close events (benchmark first: make bench-io)")
@@ -80,7 +80,7 @@ func main() {
 	}
 
 	if err := app.Run(ctx, o); err != nil {
-		fmt.Fprintf(os.Stderr, "agentloupe: fatal: %v\n", err)
+		fmt.Fprintf(os.Stderr, "forkline: fatal: %v\n", err)
 		os.Exit(1)
 	}
 }

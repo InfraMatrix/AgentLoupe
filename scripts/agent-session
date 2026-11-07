@@ -37,14 +37,14 @@
 #                    a key that happens to be in your shell; listed, but never
 #                    picked without asking (it may be there for something else)
 #
-#   <dir> = AGENT_CREDENTIALS_DIR (default ~/.config/agentloupe/agent-credentials);
+#   <dir> = AGENT_CREDENTIALS_DIR (default ~/.config/forkline/agent-credentials);
 #   keep its files mode 600.
 #
 # Which choice wins (credentials / model):
 #   1. AGENT_AUTH=<id> / AGENT_MODEL=<alias|id>   for this run
 #      (AGENT_API_KEY_FILE / AGENT_API_KEY also count as choosing a key)
 #   2. the saved choice from `pick` (AGENT_SESSION_FILE, default
-#      ~/.config/agentloupe/agent-session: ids only, never secrets)
+#      ~/.config/forkline/agent-session: ids only, never secrets)
 #   3. a menu (or, for credentials, the only candidate)
 # Then it ALWAYS asks "are these right?" before anything runs; answering no
 # prints how to set the credentials you want. Without a terminal it refuses
@@ -62,8 +62,8 @@
 # tokens, Bedrock/Vertex/Foundry switches, CLAUDE_CONFIG_DIR) and the analysis
 # key. Secrets never go on a command line (the capture records argv, not envp).
 
-AA_DIR="${AGENT_CREDENTIALS_DIR:-$HOME/.config/agentloupe/agent-credentials}"
-AS_FILE="${AGENT_SESSION_FILE:-$HOME/.config/agentloupe/agent-session}"
+AA_DIR="${AGENT_CREDENTIALS_DIR:-$HOME/.config/forkline/agent-credentials}"
+AS_FILE="${AGENT_SESSION_FILE:-$HOME/.config/forkline/agent-session}"
 AA_CLAUDE="${CLAUDE_BIN:-claude}"
 AS_AVAILABLE=()  # models the chosen credentials' service offers (API keys only)
 AS_LIST_NOTE=""  # why there is no list, when there is none

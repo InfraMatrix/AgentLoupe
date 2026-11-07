@@ -1,4 +1,4 @@
-# AgentLoupe example configuration. Copy to /etc/agentloupe/agents.yaml
+# Forkline example configuration. Copy to /etc/forkline/agents.yaml
 # (or point --config at it) and edit. The loader re-resolves paths on
 # inotify events in the parent directory, so package-manager upgrades
 # (write temp + rename over) are picked up without a restart.

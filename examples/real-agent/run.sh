@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Real-agent demo: Claude Code fixes an injected NetworkX bug while
-# AgentLoupe watches from the kernel and the AgentLoupe hook records
+# Forkline watches from the kernel and the Forkline hook records
 # every tool call. Produces a capture + harness spans file whose tool
 # spans are named (Bash/Read/Edit/...) and carry per-call resources.
 #
@@ -16,7 +16,7 @@
 #   2. injects a one-line bug in networkx/algorithms/shortest_paths/
 #      weighted.py (`<` -> `<=` in Dijkstra's relaxation: equal-length
 #      paths stop being recorded as predecessors; 4 tests fail),
-#   3. installs the AgentLoupe hook in $WORK/networkx/.claude/settings.json,
+#   3. installs the Forkline hook in $WORK/networkx/.claude/settings.json,
 #   4. runs the loader (sudo) with --catalog-only claude-code,
 #   5. runs `claude -p` with a prompt to set up a venv, fix the failing
 #      test without touching tests, and run the full suite,
@@ -40,7 +40,7 @@
 #   analysis model (AgentCutter, SAVE_CANNED=1 only)  META_MODEL_API_KEY;
 #                               never passed to the agent.
 #
-# Overrides: WORK (default /tmp/agentloupe-real-agent), MAX_RUNTIME (20m),
+# Overrides: WORK (default /tmp/forkline-real-agent), MAX_RUNTIME (20m),
 # CLAUDE_BIN (claude), MAX_BUDGET_USD (5), FILE_RW=1 (also per-call
 # file_read/file_write events: much larger capture), SAVE_CANNED=1.
 set -euo pipefail
@@ -53,7 +53,7 @@ BUG_FILE="networkx/algorithms/shortest_paths/weighted.py"
 BUG_FROM="            elif u not in seen or vu_dist < seen[u]:"
 BUG_TO="            elif u not in seen or vu_dist <= seen[u]:"
 
-WORK="${WORK:-/tmp/agentloupe-real-agent}"
+WORK="${WORK:-/tmp/forkline-real-agent}"
 OUT="$WORK/out"
 CAPTURE="$OUT/capture.jsonl"
 SPANS="$OUT/capture.spans.jsonl" # <capture>.spans.jsonl: auto-detected
@@ -99,8 +99,8 @@ sudo -v || die "sudo authentication failed"
 
 say "Building (as your user)"
 make build
-go build -o loupe-timeline ./cmd/loupe-timeline
-go build -o loupe-scorecard ./cmd/loupe-scorecard
+go build -o forkline-timeline ./cmd/forkline-timeline
+go build -o forkline-scorecard ./cmd/forkline-scorecard
 
 say "Preparing NetworkX @ ${NX_COMMIT:0:12} in $WORK"
 rm -rf "$WORK"
@@ -121,7 +121,7 @@ open(path, "w", encoding="utf-8").write(src.replace(old + "\n", new + "\n"))
 PY
 git -C "$WORK/networkx" diff --stat
 mkdir -p "$WORK/networkx/.claude"
-HOOK="python3 $ROOT/hooks/agentloupe_hook.py"
+HOOK="python3 $ROOT/hooks/forkline_hook.py"
 python3 - "$WORK/networkx/.claude/settings.json" "$HOOK" <<'PY'
 import json, sys
 path, cmd = sys.argv[1:3]
@@ -134,9 +134,9 @@ info "hook installed: $WORK/networkx/.claude/settings.json -> $SPANS"
 say "Starting loader ($MAX_RUNTIME max, log: $LOADER_LOG)"
 RW_FLAG=()
 [ "${FILE_RW:-0}" = "1" ] && RW_FLAG=(--enable-file-rw-events)
-sudo ./agentloupe \
+sudo ./forkline \
   --catalog-only claude-code \
-  --bpf-object bpf/agentloupe.bpf.o \
+  --bpf-object bpf/forkline.bpf.o \
   --enable-syscall-summary \
   --enable-io-accounting \
   --enable-net-send-events \
@@ -168,7 +168,7 @@ set +e
 (
   cd "$WORK/networkx"
   agent_auth_apply # only the chosen credential; no analysis key
-  AGENTLOUPE_SPANS="$SPANS" "$CLAUDE_BIN" -p "$PROMPT" \
+  FORKLINE_SPANS="$SPANS" "$CLAUDE_BIN" -p "$PROMPT" \
     "${AS_MODEL_ARGS[@]}" \
     --permission-mode acceptEdits \
     --allowedTools "$ALLOWED_TOOLS" \
@@ -207,10 +207,10 @@ grep -Eq 'ringbuf_drops=[1-9]' "$LOADER_LOG" && printf 'real-agent: WARNING: rin
 git -C "$WORK/networkx" diff -- networkx | head -20
 
 say "Scorecard"
-./loupe-scorecard "$CAPTURE"
+./forkline-scorecard "$CAPTURE"
 say "Tool spans"
-./loupe-timeline --tool-spans "$CAPTURE" | tee "$OUT/tool-spans.txt"
-./loupe-timeline --html "$OUT/timeline.html" "$CAPTURE" >/dev/null
+./forkline-timeline --tool-spans "$CAPTURE" | tee "$OUT/tool-spans.txt"
+./forkline-timeline --html "$OUT/timeline.html" "$CAPTURE" >/dev/null
 
 if [ "${SAVE_CANNED:-0}" = "1" ]; then
   say "Refreshing examples/canned/ (sanitized)"

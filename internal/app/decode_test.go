@@ -10,11 +10,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/InfraMatrix/AgentLoupe/internal/config"
+	"github.com/InfraMatrix/forkline/internal/config"
 )
 
 // ---- raw record fixtures -------------------------------------------------
-// Layout mirrors bpf/agentloupe.h exactly (see abi_layout_test.go, which
+// Layout mirrors bpf/forkline.h exactly (see abi_layout_test.go, which
 // fails if these sizes/offsets drift from the C structs):
 //   event_hdr 72 B, then one fixed-size payload per type.
 //   ev_exec 1560, ev_fork 8, ev_exit 32, ev_file_open 536, ev_file_unlink 520,

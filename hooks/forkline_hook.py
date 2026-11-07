@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""AgentLoupe harness hook for Claude Code: one JSONL line per tool event.
+"""Forkline harness hook for Claude Code: one JSONL line per tool event.
 
 Install as a PreToolUse, PostToolUse and PostToolUseFailure command hook
 (see hooks/claude-settings.example.json). Claude Code pipes the hook
@@ -7,16 +7,16 @@ payload to stdin; this script appends one line to the spans file and
 exits 0 without printing anything, so it can never block, deny, or alter
 a tool call. Standard library only.
 
-Spans file: $AGENTLOUPE_SPANS, else
-$AGENTLOUPE_CAPTURE_DIR/spans.jsonl, else /tmp/agentloupe/spans.jsonl.
-Name it <capture>.spans.jsonl next to the capture and loupe-timeline
+Spans file: $FORKLINE_SPANS, else
+$FORKLINE_CAPTURE_DIR/spans.jsonl, else /tmp/forkline/spans.jsonl.
+Name it <capture>.spans.jsonl next to the capture and forkline-timeline
 picks it up automatically.
 
 Record fields:
   event        "pre" | "post" | "post_failure"
   tool_name    Claude Code tool name (Bash, Read, Edit, Grep, ...)
   tool_use_id  pairs pre with post
-  session_id   Claude Code's session id (not AgentLoupe's)
+  session_id   Claude Code's session id (not Forkline's)
   ts_ns        CLOCK_REALTIME, ns since the Unix epoch
   mono_ns      CLOCK_MONOTONIC, ns — the clock the kernel probes use
                (bpf_ktime_get_ns); with the capture's capture_meta
@@ -89,10 +89,10 @@ def ancestors(start_pid, limit=8):
 
 
 def spans_path():
-    p = os.environ.get("AGENTLOUPE_SPANS")
+    p = os.environ.get("FORKLINE_SPANS")
     if p:
         return p
-    d = os.environ.get("AGENTLOUPE_CAPTURE_DIR", "/tmp/agentloupe")
+    d = os.environ.get("FORKLINE_CAPTURE_DIR", "/tmp/forkline")
     return os.path.join(d, "spans.jsonl")
 
 

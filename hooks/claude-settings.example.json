@@ -4,7 +4,7 @@
       {
         "matcher": "*",
         "hooks": [
-          { "type": "command", "command": "python3 /path/to/AgentLoupe/hooks/agentloupe_hook.py" }
+          { "type": "command", "command": "python3 /path/to/forkline/hooks/forkline_hook.py" }
         ]
       }
     ],
@@ -12,7 +12,7 @@
       {
         "matcher": "*",
         "hooks": [
-          { "type": "command", "command": "python3 /path/to/AgentLoupe/hooks/agentloupe_hook.py" }
+          { "type": "command", "command": "python3 /path/to/forkline/hooks/forkline_hook.py" }
         ]
       }
     ],
@@ -20,7 +20,7 @@
       {
         "matcher": "*",
         "hooks": [
-          { "type": "command", "command": "python3 /path/to/AgentLoupe/hooks/agentloupe_hook.py" }
+          { "type": "command", "command": "python3 /path/to/forkline/hooks/forkline_hook.py" }
         ]
       }
     ]

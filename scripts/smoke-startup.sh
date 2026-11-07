@@ -38,7 +38,7 @@ say "Building (as your user)"
 make build >/dev/null
 sudo -v
 
-TMP="$(mktemp -d /tmp/loupe-smoke.XXXXXX)"
+TMP="$(mktemp -d /tmp/forkline-smoke.XXXXXX)"
 LOADER_PID=""
 cleanup() {
   [ -n "$LOADER_PID" ] && sudo kill -INT "$LOADER_PID" 2>/dev/null || true
@@ -102,8 +102,8 @@ for MODE in "${MODES[@]}"; do
   AGENT_PID=$!
   sleep 0.5
 
-  sudo ./agentloupe \
-    --bpf-object bpf/agentloupe.bpf.o \
+  sudo ./forkline \
+    --bpf-object bpf/forkline.bpf.o \
     --config "$TMP/no-config.yaml" \
     --attach-comm lsmoke-comm --attach-comm lsmoke-agent \
     --attach-exe "$TMP/exe/lsmoke-exe-*" \

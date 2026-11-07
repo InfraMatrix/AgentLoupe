@@ -6,7 +6,7 @@ Keeps only the session whose root ran in --keep-cwd (the loader's
 the host; those sessions are dropped), plus the capture_meta record, and
 the harness spans file. Every string is sanitized: the work dir becomes
 /work, $HOME becomes /u/demo, the user name becomes "demo". Then renders
-report.json (loupe-timeline --json) and, if AgentCutter is available,
+report.json (forkline-timeline --json) and, if AgentCutter is available,
 analysis.md (real model call when META_MODEL_API_KEY is set, else its
 --dry-run, labelled as such).
 
@@ -55,7 +55,7 @@ def make_sanitizer(work: str):
 
 def cwd_matches(cwd: str, want: str) -> bool:
     """LSM-mode exec cwd comes from a bounded dentry walk that can miss a
-    mount prefix (e.g. /tmp on tmpfs shows as /agentloupe-real-agent/...),
+    mount prefix (e.g. /tmp on tmpfs shows as /forkline-real-agent/...),
     so accept a cwd that is a suffix of the wanted path too."""
     cwd, want = cwd.rstrip("/"), want.rstrip("/")
     return bool(cwd) and (cwd == want or cwd.startswith(want + "/") or want.endswith(cwd))
@@ -84,7 +84,7 @@ def main() -> int:
     ap.add_argument("--keep-cwd", required=True)
     ap.add_argument("--work", required=True)
     ap.add_argument("--out", type=Path, default=ROOT / "examples" / "canned")
-    ap.add_argument("--timeline", type=Path, default=ROOT / "loupe-timeline")
+    ap.add_argument("--timeline", type=Path, default=ROOT / "forkline-timeline")
     ap.add_argument("--agentcutter", type=Path, default=ROOT.parent / "AgentCutter")
     args = ap.parse_args()
 

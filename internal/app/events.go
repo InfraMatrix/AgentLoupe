@@ -12,10 +12,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/InfraMatrix/AgentLoupe/internal/config"
+	"github.com/InfraMatrix/forkline/internal/config"
 )
 
-// Event type numbers mirror enum event_type in bpf/agentloupe.h.
+// Event type numbers mirror enum event_type in bpf/forkline.h.
 var typeNames = map[uint16]string{
 	1: "exec", 2: "fork", 3: "exit", 4: "file_open", 5: "file_unlink",
 	6: "file_rename", 7: "file_chmod", 8: "file_close", 9: "file_io",
@@ -69,6 +69,11 @@ func parseArgv(b []byte) []string {
 
 // Decode parses one ring-buffer record: event_hdr (72 B) + payload.
 // Malformed records are an error the caller counts; never a panic.
+// abiVersion is the only ABI version the decoder accepts; it must equal
+// FORKLINE_ABI_VERSION in bpf/forkline.h (checked in abi_layout_test.go)
+// and is echoed in the capture_meta record.
+const abiVersion = 9
+
 func Decode(raw []byte) (*Decoded, error) {
 	if len(raw) < 72 {
 		return nil, fmt.Errorf("short record: %d bytes", len(raw))
@@ -88,8 +93,8 @@ func Decode(raw []byte) (*Decoded, error) {
 	}
 	size := int(binary.LittleEndian.Uint16(raw[2:4]))
 	version := binary.LittleEndian.Uint16(raw[4:6])
-	if version != 9 {
-		return nil, fmt.Errorf("abi version %d, want 9", version)
+	if version != abiVersion {
+		return nil, fmt.Errorf("abi version %d, want %d", version, abiVersion)
 	}
 	if size < 72 || size > len(raw) {
 		return nil, fmt.Errorf("bad record size %d (have %d)", size, len(raw))

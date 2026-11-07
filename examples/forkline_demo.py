@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Deterministic AgentLoupe demo workload (tracked in the repo).
+"""Deterministic Forkline demo workload (tracked in the repo).
 
-Run by scripts/demo.sh as ``python3 examples/loupe_demo.py`` — the
-``loupe_demo`` marker in argv is what configs/loupe-demo.yaml confirms
+Run by scripts/demo.sh as ``python3 examples/forkline_demo.py`` — the
+``forkline_demo`` marker in argv is what configs/forkline-demo.yaml confirms
 the session by. Exercises, with no internet access:
 
   * a child process (``echo``),
@@ -20,13 +20,13 @@ from pathlib import Path
 
 
 def main() -> None:
-    with tempfile.TemporaryDirectory(prefix="loupe-demo-") as tmp:
+    with tempfile.TemporaryDirectory(prefix="forkline-demo-") as tmp:
         path = Path(tmp) / "demo.txt"
-        path.write_text("agentloupe demo\n", encoding="utf-8")
-        if path.read_text(encoding="utf-8") != "agentloupe demo\n":
-            raise SystemExit("loupe_demo: file read-back mismatch")
+        path.write_text("forkline demo\n", encoding="utf-8")
+        if path.read_text(encoding="utf-8") != "forkline demo\n":
+            raise SystemExit("forkline_demo: file read-back mismatch")
 
-    subprocess.run(["echo", "agentloupe-demo"], check=True)
+    subprocess.run(["echo", "forkline-demo"], check=True)
 
     # TCP: listener and client are both this process (no internet).
     with socket.socket() as listener:
@@ -38,7 +38,7 @@ def main() -> None:
             with conn:
                 client.sendall(b"x")
                 if conn.recv(1) != b"x":
-                    raise SystemExit("loupe_demo: TCP echo mismatch")
+                    raise SystemExit("forkline_demo: TCP echo mismatch")
 
     # UDP: a connect() on a datagram socket + one datagram to our listener.
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as receiver:
@@ -50,9 +50,9 @@ def main() -> None:
             client.send(b"x")
             data, _ = receiver.recvfrom(1)
             if data != b"x":
-                raise SystemExit("loupe_demo: UDP payload mismatch")
+                raise SystemExit("forkline_demo: UDP payload mismatch")
 
-    print("loupe_demo: ok")
+    print("forkline_demo: ok")
 
 
 if __name__ == "__main__":

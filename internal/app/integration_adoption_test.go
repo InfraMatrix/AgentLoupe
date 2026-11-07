@@ -95,7 +95,7 @@ func TestIntegrationAdoption(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	bpfObject := filepath.Join(root, "bpf", "agentloupe.bpf.o")
+	bpfObject := filepath.Join(root, "bpf", "forkline.bpf.o")
 	if _, err := os.Stat(bpfObject); err != nil {
 		t.Fatalf("BPF object missing (%v): run `make build` as your normal user first, then `sudo make integration`", err)
 	}

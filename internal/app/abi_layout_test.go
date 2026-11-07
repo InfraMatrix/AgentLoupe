@@ -1,6 +1,6 @@
 package app
 
-// Struct-layout drift check between the C ABI (bpf/agentloupe.h) and Go.
+// Struct-layout drift check between the C ABI (bpf/forkline.h) and Go.
 //
 // The Go side has no event structs of its own: the decoder works on raw
 // byte offsets (events.go), as do the map encoders (maps.go) and the
@@ -14,7 +14,7 @@ package app
 //     encoders actually index.
 //
 // If the C ABI changes, update the header asserts, the mirrors, and the
-// decoder in the same commit — and bump AGENTLOUPE_ABI_VERSION.
+// decoder in the same commit — and bump FORKLINE_ABI_VERSION.
 
 import (
 	"os"
@@ -25,7 +25,7 @@ import (
 	"unsafe"
 )
 
-// Mirror structs: field order/types copy bpf/agentloupe.h one-to-one.
+// Mirror structs: field order/types copy bpf/forkline.h one-to-one.
 type eventHdrMirror struct {
 	Type      uint16
 	Size      uint16
@@ -114,7 +114,7 @@ type evFileCloseMirror struct {
 	Pad        [7]uint8
 }
 
-// ev_file_rw (ABI v5, slice 2a): mirrors bpf/agentloupe.h one-to-one,
+// ev_file_rw (ABI v5, slice 2a): mirrors bpf/forkline.h one-to-one,
 // including the reserved DurationUS (always zero until slice 2b).
 type evFileRWMirror struct {
 	Path       [512]byte
@@ -216,13 +216,13 @@ type agentRefMirror struct {
 	AgentName [32]byte
 }
 
-// agentloupe_config (ABI v9: 40 bytes; v6-v8 were 32 — v9 added
+// forkline_config (ABI v9: 40 bytes; v6-v8 were 32 — v9 added
 // enable_comm_rules and journal_untracked).
 // Pinned here because the loader writes it as raw bytes in
 // maps.go setConfig/setNetUDPOnly: a silent sizeof change on the C side
 // (e.g. struct tail padding after adding a field) breaks every loader
 // run, and only a live kernel would notice otherwise.
-type agentloupeConfigMirror struct {
+type forklineConfigMirror struct {
 	RunID                  uint64
 	EnableSyscallSummary   uint32
 	EnableFileIOAccounting uint32
@@ -241,35 +241,35 @@ type commKeyMirror struct {
 
 func goStructSizes() map[string]uintptr {
 	return map[string]uintptr{
-		"event_hdr":         unsafe.Sizeof(eventHdrMirror{}),
-		"ev_exec":           unsafe.Sizeof(evExecMirror{}),
-		"ev_fork":           unsafe.Sizeof(evForkMirror{}),
-		"ev_exit":           unsafe.Sizeof(evExitMirror{}),
-		"ev_file_open":      unsafe.Sizeof(evFileOpenMirror{}),
-		"ev_file_unlink":    unsafe.Sizeof(evFileUnlinkMirror{}),
-		"ev_file_rename":    unsafe.Sizeof(evFileRenameMirror{}),
-		"ev_file_chmod":     unsafe.Sizeof(evFileChmodMirror{}),
-		"ev_file_close":     unsafe.Sizeof(evFileCloseMirror{}),
-		"ev_file_rw":        unsafe.Sizeof(evFileRWMirror{}),
-		"ev_net_connect":    unsafe.Sizeof(evNetConnectMirror{}),
-		"ev_net_send":       unsafe.Sizeof(evNetSendMirror{}),
-		"ev_net_recv":       unsafe.Sizeof(evNetRecvMirror{}),
-		"session_info":      unsafe.Sizeof(sessionInfoMirror{}),
-		"tracked_session":   unsafe.Sizeof(trackedSessionMirror{}),
-		"fd_info":           unsafe.Sizeof(fdInfoMirror{}),
-		"binary_id":         unsafe.Sizeof(binaryIDMirror{}),
-		"agent_ref":         unsafe.Sizeof(agentRefMirror{}),
-		"syscall_key":       unsafe.Sizeof(syscallKeyMirror{}),
-		"agentloupe_config": unsafe.Sizeof(agentloupeConfigMirror{}),
-		"comm_key":          unsafe.Sizeof(commKeyMirror{}),
+		"event_hdr":       unsafe.Sizeof(eventHdrMirror{}),
+		"ev_exec":         unsafe.Sizeof(evExecMirror{}),
+		"ev_fork":         unsafe.Sizeof(evForkMirror{}),
+		"ev_exit":         unsafe.Sizeof(evExitMirror{}),
+		"ev_file_open":    unsafe.Sizeof(evFileOpenMirror{}),
+		"ev_file_unlink":  unsafe.Sizeof(evFileUnlinkMirror{}),
+		"ev_file_rename":  unsafe.Sizeof(evFileRenameMirror{}),
+		"ev_file_chmod":   unsafe.Sizeof(evFileChmodMirror{}),
+		"ev_file_close":   unsafe.Sizeof(evFileCloseMirror{}),
+		"ev_file_rw":      unsafe.Sizeof(evFileRWMirror{}),
+		"ev_net_connect":  unsafe.Sizeof(evNetConnectMirror{}),
+		"ev_net_send":     unsafe.Sizeof(evNetSendMirror{}),
+		"ev_net_recv":     unsafe.Sizeof(evNetRecvMirror{}),
+		"session_info":    unsafe.Sizeof(sessionInfoMirror{}),
+		"tracked_session": unsafe.Sizeof(trackedSessionMirror{}),
+		"fd_info":         unsafe.Sizeof(fdInfoMirror{}),
+		"binary_id":       unsafe.Sizeof(binaryIDMirror{}),
+		"agent_ref":       unsafe.Sizeof(agentRefMirror{}),
+		"syscall_key":     unsafe.Sizeof(syscallKeyMirror{}),
+		"forkline_config": unsafe.Sizeof(forklineConfigMirror{}),
+		"comm_key":        unsafe.Sizeof(commKeyMirror{}),
 	}
 }
 
-// cStructSizes extracts the sizes bpf/agentloupe.h itself declares, from
+// cStructSizes extracts the sizes bpf/forkline.h itself declares, from
 // both the "/* N bytes */" struct annotations and the _Static_asserts.
 func cStructSizes(t *testing.T) map[string]int {
 	t.Helper()
-	data, err := os.ReadFile("../../bpf/agentloupe.h")
+	data, err := os.ReadFile("../../bpf/forkline.h")
 	if err != nil {
 		t.Fatalf("read C header: %v", err)
 	}
@@ -316,7 +316,7 @@ func TestStructSizesMatchCHeader(t *testing.T) {
 		"event_hdr", "ev_exec", "ev_fork", "ev_exit", "ev_file_open",
 		"ev_file_unlink", "ev_file_rename", "ev_file_chmod", "ev_file_close",
 		"ev_file_rw", "ev_net_connect", "ev_net_send", "ev_net_recv", "session_info", "tracked_session",
-		"fd_info", "syscall_key", "agentloupe_config",
+		"fd_info", "syscall_key", "forkline_config",
 	} {
 		if _, ok := cSizes[name]; !ok {
 			t.Errorf("C header no longer declares a size for struct %s; update this test with the ABI change", name)
@@ -328,12 +328,12 @@ func TestStructSizesMatchCHeader(t *testing.T) {
 			continue // C struct the Go side never touches byte-wise
 		}
 		if int(gSize) != cSize {
-			t.Errorf("struct %s: Go mirror is %d bytes, C header says %d — ABI drift; update the decoder and bump AGENTLOUPE_ABI_VERSION", name, gSize, cSize)
+			t.Errorf("struct %s: Go mirror is %d bytes, C header says %d — ABI drift; update the decoder and bump FORKLINE_ABI_VERSION", name, gSize, cSize)
 		}
 	}
 	for name, gSize := range goSizes {
 		if _, ok := cSizes[name]; !ok {
-			t.Errorf("Go mirror for struct %s (%d bytes) has no size declared in bpf/agentloupe.h; add a /* N bytes */ annotation or _Static_assert", name, gSize)
+			t.Errorf("Go mirror for struct %s (%d bytes) has no size declared in bpf/forkline.h; add a /* N bytes */ annotation or _Static_assert", name, gSize)
 		}
 	}
 }
@@ -411,17 +411,17 @@ func TestStructOffsetsMatchDecoder(t *testing.T) {
 		{"syscall_key.tgid (key[8:12])", unsafe.Offsetof(syscallKeyMirror{}.TGID), 8},
 		{"syscall_key.syscall_nr (key[12:16])", unsafe.Offsetof(syscallKeyMirror{}.Nr), 12},
 		{"agent_ref.agent_name (v[4:36])", unsafe.Offsetof(agentRefMirror{}.AgentName), 4},
-		{"agentloupe_config.run_id (cfg[0:8])", unsafe.Offsetof(agentloupeConfigMirror{}.RunID), 0},
-		{"agentloupe_config.enable_syscall_summary (cfg[8:12])", unsafe.Offsetof(agentloupeConfigMirror{}.EnableSyscallSummary), 8},
-		{"agentloupe_config.enable_file_io_accounting (cfg[12:16])", unsafe.Offsetof(agentloupeConfigMirror{}.EnableFileIOAccounting), 12},
-		{"agentloupe_config.enable_file_mutations (cfg[16:20])", unsafe.Offsetof(agentloupeConfigMirror{}.EnableFileMutations), 16},
-		{"agentloupe_config.net_udp_only (cfg[20:24])", unsafe.Offsetof(agentloupeConfigMirror{}.NetUDPOnly), 20},
-		{"agentloupe_config.enable_file_rw_events (cfg[24:28])", unsafe.Offsetof(agentloupeConfigMirror{}.EnableFileRWEvents), 24},
-		{"agentloupe_config.enable_net_send_events (cfg[28:32])", unsafe.Offsetof(agentloupeConfigMirror{}.EnableNetSendEvents), 28},
-		{"agentloupe_config.net_udp_only == cfgOffNetUDPOnly", unsafe.Offsetof(agentloupeConfigMirror{}.NetUDPOnly), cfgOffNetUDPOnly},
-		{"agentloupe_config.enable_comm_rules == cfgOffCommRules", unsafe.Offsetof(agentloupeConfigMirror{}.EnableCommRules), cfgOffCommRules},
-		{"agentloupe_config.journal_untracked == cfgOffJournalUntracked", unsafe.Offsetof(agentloupeConfigMirror{}.JournalUntracked), cfgOffJournalUntracked},
-		{"sizeof(agentloupe_config) == configSize", unsafe.Sizeof(agentloupeConfigMirror{}), configSize},
+		{"forkline_config.run_id (cfg[0:8])", unsafe.Offsetof(forklineConfigMirror{}.RunID), 0},
+		{"forkline_config.enable_syscall_summary (cfg[8:12])", unsafe.Offsetof(forklineConfigMirror{}.EnableSyscallSummary), 8},
+		{"forkline_config.enable_file_io_accounting (cfg[12:16])", unsafe.Offsetof(forklineConfigMirror{}.EnableFileIOAccounting), 12},
+		{"forkline_config.enable_file_mutations (cfg[16:20])", unsafe.Offsetof(forklineConfigMirror{}.EnableFileMutations), 16},
+		{"forkline_config.net_udp_only (cfg[20:24])", unsafe.Offsetof(forklineConfigMirror{}.NetUDPOnly), 20},
+		{"forkline_config.enable_file_rw_events (cfg[24:28])", unsafe.Offsetof(forklineConfigMirror{}.EnableFileRWEvents), 24},
+		{"forkline_config.enable_net_send_events (cfg[28:32])", unsafe.Offsetof(forklineConfigMirror{}.EnableNetSendEvents), 28},
+		{"forkline_config.net_udp_only == cfgOffNetUDPOnly", unsafe.Offsetof(forklineConfigMirror{}.NetUDPOnly), cfgOffNetUDPOnly},
+		{"forkline_config.enable_comm_rules == cfgOffCommRules", unsafe.Offsetof(forklineConfigMirror{}.EnableCommRules), cfgOffCommRules},
+		{"forkline_config.journal_untracked == cfgOffJournalUntracked", unsafe.Offsetof(forklineConfigMirror{}.JournalUntracked), cfgOffJournalUntracked},
+		{"sizeof(forkline_config) == configSize", unsafe.Sizeof(forklineConfigMirror{}), configSize},
 	}
 	for _, tt := range tests {
 		if tt.got != tt.want {
@@ -457,17 +457,17 @@ func TestRecordSizesMatchEVLEN(t *testing.T) {
 }
 
 func TestABIVersionMatchesHeader(t *testing.T) {
-	data, err := os.ReadFile("../../bpf/agentloupe.h")
+	data, err := os.ReadFile("../../bpf/forkline.h")
 	if err != nil {
 		t.Fatalf("read C header: %v", err)
 	}
-	m := regexp.MustCompile(`#define AGENTLOUPE_ABI_VERSION (\d+)`).FindSubmatch(data)
+	m := regexp.MustCompile(`#define FORKLINE_ABI_VERSION (\d+)`).FindSubmatch(data)
 	if m == nil {
-		t.Fatal("AGENTLOUPE_ABI_VERSION not found in bpf/agentloupe.h")
+		t.Fatal("FORKLINE_ABI_VERSION not found in bpf/forkline.h")
 	}
 	// Decode rejects anything but version 9 (see TestDecodeMalformed);
 	// if the header bumps the version, the decoder must move with it.
-	if string(m[1]) != "9" {
-		t.Errorf("AGENTLOUPE_ABI_VERSION = %s, but the Go decoder only accepts 9", m[1])
+	if string(m[1]) != strconv.Itoa(abiVersion) {
+		t.Errorf("FORKLINE_ABI_VERSION = %s, but the Go decoder only accepts %d (abiVersion in events.go)", m[1], abiVersion)
 	}
 }

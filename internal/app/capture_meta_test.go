@@ -28,6 +28,9 @@ func TestCaptureMetaRecordClockContract(t *testing.T) {
 	if sid, _ := m["session_id"].(json.Number).Int64(); sid != 0 {
 		t.Fatalf("capture_meta must not belong to a session, got %d", sid)
 	}
+	if v, _ := m["abi_version"].(json.Number).Int64(); v != abiVersion {
+		t.Fatalf("capture_meta abi_version = %d, want %d (the decoder's)", v, abiVersion)
+	}
 	base, _ := m["wall_base_unix_ns"].(json.Number).Int64()
 	if base != wallBase.UnixNano() {
 		t.Fatalf("wall_base_unix_ns = %d, want %d", base, wallBase.UnixNano())

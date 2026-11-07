@@ -187,7 +187,7 @@ func linkIDsForPrograms(progIDs map[uint32]bool) ([]uint32, error) {
 	return leaked, nil
 }
 
-var agentloupeMapNames = map[string]bool{
+var forklineMapNames = map[string]bool{
 	"tracked_session": true, "sessions": true, "agent_binaries": true,
 	"candidates": true, "agent_cgroups": true, "file_infos": true,
 	"syscall_counts": true, "session_counter": true, "config_map": true,
@@ -206,7 +206,7 @@ func TestIntegrationLoaderObserveOnly(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	bpfObject := filepath.Join(root, "bpf", "agentloupe.bpf.o")
+	bpfObject := filepath.Join(root, "bpf", "forkline.bpf.o")
 	if _, err := os.Stat(bpfObject); err != nil {
 		t.Fatalf("BPF object missing (%v): run `make build` as your normal user first, then `sudo make integration`\ncaptured event stream:\n%s", err, "(loader never started)")
 	}
@@ -278,7 +278,7 @@ func TestIntegrationLoaderObserveOnly(t *testing.T) {
 	}()
 	listenPort := uint16(listener.Addr().(*net.TCPAddr).Port)
 
-	// UDP listener: the workload connects (SOCK_DGRAM) to it; Loupe must
+	// UDP listener: the workload connects (SOCK_DGRAM) to it; Forkline must
 	// report it via sys_enter_connect even with TCP fexit attached.
 	udpAddr, err := net.ResolveUDPAddr("udp", "127.0.0.1:0")
 	if err != nil {
@@ -323,8 +323,8 @@ func TestIntegrationLoaderObserveOnly(t *testing.T) {
 			StatsInterval:        0,
 			EnableSyscallSummary: true,
 			// Slice 2a: per-call read/write events are opt-in; the
-			// workload's 10-byte write to probe.txt must surface as a
-			// file_write with bytes=10. Byte accounting stays off to
+			// workload's single write of probePayload to probe.txt must
+			// surface as one file_write of that size. Byte accounting stays off to
 			// prove rw events work without it.
 			EnableFileRWEvents: true,
 			// Slice 3: per-call send events are opt-in; the
@@ -350,13 +350,16 @@ func TestIntegrationLoaderObserveOnly(t *testing.T) {
 	// parser on the sendto buf/len path) and one TCP send carrying a
 	// hand-built ClientHello with an SNI extension (exercises the SNI
 	// parser). Both names use .invalid so nothing ever resolves.
-	const dnsName = "agentloupe-probe.invalid"
-	const sniName = "agentloupe-tls.invalid"
+	// probePayload is written once to probe.txt; the file_write assertion
+	// checks len(probePayload), so renaming the string cannot break it.
+	const probePayload = "forkline"
+	const dnsName = "forkline-probe.invalid"
+	const sniName = "forkline-tls.invalid"
 	script := fmt.Sprintf(`
 import socket, struct, subprocess, time
 marker = %q
 with open(%q, "w") as f:
-    f.write("agentloupe")
+    f.write(%q)
 p = subprocess.Popen([%q])
 p.wait()
 with open(%q, "w") as f:
@@ -394,7 +397,7 @@ hello = b"\x16\x03\x01" + len(hs).to_bytes(2, "big") + hs
 s2 = socket.create_connection(("127.0.0.1", %d), timeout=5)
 s2.send(hello)
 s2.close()
-`, token, targetFile, trueBin, pidFile, listenPort, udpPort, dnsName, udpPort, sniName, listenPort)
+`, token, targetFile, probePayload, trueBin, pidFile, listenPort, udpPort, dnsName, udpPort, sniName, listenPort)
 
 	type workloadResult struct {
 		pyPID, truePID int
@@ -594,8 +597,8 @@ FOUND:
 	if writeEv == nil {
 		fail("missing file_write for %s (pid %d) despite --enable-file-rw-events", targetFile, lastWorkload.pyPID)
 	}
-	if writeEv.Bytes == nil || *writeEv.Bytes != 10 {
-		fail("file_write bytes = %d, want 10 (one 10-byte write call): %s", *writeEv.Bytes, writeEv.Raw)
+	if writeEv.Bytes == nil || *writeEv.Bytes != uint64(len(probePayload)) {
+		fail("file_write bytes = %d, want %d (one write of %q): %s", *writeEv.Bytes, len(probePayload), probePayload, writeEv.Raw)
 	}
 	if writeEv.AgentName != agentName {
 		fail("file_write agent_name = %q, want %q", writeEv.AgentName, agentName)
@@ -896,7 +899,7 @@ FOUND:
 		mapIDs, mapNameByID := mapSnapshot()
 		var leakedMaps []string
 		for id := range mapIDs {
-			if !baseMaps[id] && agentloupeMapNames[mapNameByID[id]] {
+			if !baseMaps[id] && forklineMapNames[mapNameByID[id]] {
 				leakedMaps = append(leakedMaps, fmt.Sprintf("%s(%d)", mapNameByID[id], id))
 			}
 		}

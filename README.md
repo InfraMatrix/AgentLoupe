@@ -1,4 +1,4 @@
-# AgentLoupe
+# Forkline
 
 An agent observability tool: eBPF-based, observe-only visibility into what
 AI agents do on a Linux host — process execution, file activity, and
@@ -34,7 +34,7 @@ before running anywhere that matters.
   documented gap. This accounting is **opt-in** (benchmark first).
 
 Minimum kernel: 5.8 floor, **5.11+ for full (LSM) mode**; see
-`bpf/agentloupe.h`. The loader probes features per hook at startup and
+`bpf/forkline.h`. The loader probes features per hook at startup and
 prints which hooks attached and which fallbacks are active.
 
 ## Required toolchain
@@ -62,15 +62,15 @@ loader automatically runs in tracepoint-fallback mode.
 ```sh
 make check            # header ABI asserts + LSM return-0 safety check
 make test             # unit tests: no kernel, no root
-make build            # make bpf + go build -o agentloupe ./cmd/agentloupe
+make build            # make bpf + go build -o forkline ./cmd/forkline
 # Optional, only on the target kernel: make vmlinux.h
 
 # Default probe set: process, file-open, file-mutations, network.
 # Nothing is pinned;
 # SIGINT/SIGTERM or --max-runtime detaches everything.
-sudo ./agentloupe \
+sudo ./forkline \
   --config configs/agents.example.yaml \
-  --bpf-object bpf/agentloupe.bpf.o \
+  --bpf-object bpf/forkline.bpf.o \
   --max-runtime 60s
 ```
 
@@ -105,7 +105,7 @@ make demo          # or: bash scripts/demo.sh
 
 The script checks prerequisites (Linux ≥ 5.8, kernel BTF, toolchain,
 sudo), builds everything as your user, then runs the loader for 45s
-against `configs/loupe-demo.yaml` (the `examples/loupe_demo.py` python
+against `configs/forkline-demo.yaml` (the `examples/forkline_demo.py` python
 workload) plus `--catalog-only claude-code` (the built-in catalog
 resolves your per-user install and is skipped entirely on hosts
 without Claude Code), runs the demo workload twice, and renders
@@ -139,7 +139,7 @@ Credentials come in two kinds that the demo keeps apart. **Coding-agent
 credentials** (`AGENT_*`) decide what the observed Claude Code run bills
 to: the default `claude` login, other logged-in profiles (`~/.claude-<name>`,
 a second subscription), `claude setup-token` tokens, or API keys
-(`~/.config/agentloupe/agent-credentials/<name>.{key,oauth,profile}`,
+(`~/.config/forkline/agent-credentials/<name>.{key,oauth,profile}`,
 `AGENT_API_KEY_FILE`, `AGENT_API_KEY`). `AGENT_AUTH=list` shows what is
 available, `AGENT_AUTH=<id>` picks one, and with several available and
 no choice the script shows a menu. The model is then chosen from what
@@ -169,12 +169,12 @@ call when `META_MODEL_API_KEY` is set, otherwise its dry run).
 ```sh
 # Built-in catalog (Claude Code, Codex, Aider, Gemini CLI, Cursor —
 # only entries present on this host are activated):
-sudo ./agentloupe --catalog --bpf-object bpf/agentloupe.bpf.o
-sudo ./agentloupe --catalog-only claude-code --bpf-object bpf/agentloupe.bpf.o
+sudo ./forkline --catalog --bpf-object bpf/forkline.bpf.o
+sudo ./forkline --catalog-only claude-code --bpf-object bpf/forkline.bpf.o
 
 # Ad-hoc targets (repeatable; existing children are adopted too):
-sudo ./agentloupe --attach-pid 1234 --attach-comm claude --attach-exe '/usr/bin/c*' \
-  --bpf-object bpf/agentloupe.bpf.o
+sudo ./forkline --attach-pid 1234 --attach-comm claude --attach-exe '/usr/bin/c*' \
+  --bpf-object bpf/forkline.bpf.o
 ```
 
 New processes are scoped by the kernel at exec: binary rules, interpreter
@@ -199,19 +199,19 @@ walk re-runs every 5s (and after config reloads) as a backstop, e.g. for
 ### Reducing a capture
 
 ```sh
-go build -o loupe-scorecard ./cmd/loupe-scorecard
-./loupe-scorecard capture.jsonl          # per-session table
-./loupe-scorecard --json capture.jsonl   # machine-readable
+go build -o forkline-scorecard ./cmd/forkline-scorecard
+./forkline-scorecard capture.jsonl          # per-session table
+./forkline-scorecard --json capture.jsonl   # machine-readable
 ```
 
 Per-agent timeline and breakdown (process swimlanes, file/network
 markers, syscall rate over time):
 
 ```sh
-go build -o loupe-timeline ./cmd/loupe-timeline
-./loupe-timeline capture.jsonl                    # plain-text summary per session
-./loupe-timeline --json capture.jsonl             # same breakdown as JSON
-./loupe-timeline --html timeline.html capture.jsonl  # one self-contained
+go build -o forkline-timeline ./cmd/forkline-timeline
+./forkline-timeline capture.jsonl                    # plain-text summary per session
+./forkline-timeline --json capture.jsonl             # same breakdown as JSON
+./forkline-timeline --html timeline.html capture.jsonl  # one self-contained
                                                   # HTML file (inline CSS/JS,
                                                   # no CDN, works offline):
                                                   # filter by agent/session,
@@ -220,7 +220,7 @@ go build -o loupe-timeline ./cmd/loupe-timeline
 
 In the HTML view the syscall rate chart is stacked **by category** by
 default (process / file / network / memory / sync-wait / signals / time /
-other — one name-based mapping in `cmd/loupe-timeline/categories.go`,
+other — one name-based mapping in `cmd/forkline-timeline/categories.go`,
 applied to both amd64 and arm64 syscall names). Memory and sync/wait are
 hidden by default (they are mostly runtime background) with a toggle to
 show them, and a drill-down selector re-stacks the chart by the
@@ -236,7 +236,7 @@ attribution**: syscalls rolled up to the program that made them (e.g.
 program it exec'd. The text and `--json` outputs carry the same
 breakdowns.
 
-`loupe-timeline` streams the capture (it never loads it whole) and
+`forkline-timeline` streams the capture (it never loads it whole) and
 aggregates in Go, so multi-hundred-MB captures stay usable; markers per
 lane and the syscall time series are downsampled/bucketed for the HTML
 and the page says so when that happens. Captures without
@@ -246,14 +246,14 @@ that syscall rates are unavailable.
 
 ### Tool spans: which tool call used what
 
-`loupe-timeline` (text, `--json`, and the `--tool-spans` table) breaks
+`forkline-timeline` (text, `--json`, and the `--tool-spans` table) breaks
 each session into **tool spans** — "tool call #12 (pytest) used 40s CPU,
 300 MB of reads, 3 round trips" rather than "the session made 62 opens".
 
 ```sh
-./loupe-timeline --tool-spans capture.jsonl            # span table per session
-./loupe-timeline --json capture.jsonl | jq '.sessions[].tool_spans'
-./loupe-timeline --agent-process claude capture.jsonl  # agent wrapped by a launcher
+./forkline-timeline --tool-spans capture.jsonl            # span table per session
+./forkline-timeline --json capture.jsonl | jq '.sessions[].tool_spans'
+./forkline-timeline --agent-process claude capture.jsonl  # agent wrapped by a launcher
 ```
 
 **Layer 1 — process tree (no harness cooperation).** Most harnesses run
@@ -293,7 +293,7 @@ which event types appear) — a 0 is always a measured zero.
   `tool_span_reconciliation`: `sum(tool_spans) + agent_self == totals` on
   every additive field; a failure is also written to the report notes.
 
-**Layer 2 — harness spans via Claude Code hooks.** `hooks/agentloupe_hook.py`
+**Layer 2 — harness spans via Claude Code hooks.** `hooks/forkline_hook.py`
 (Python standard library only) is a `PreToolUse` / `PostToolUse` /
 `PostToolUseFailure` command hook that appends one JSONL line per event —
 `event` (`pre`/`post`/`post_failure`), `tool_name`, `tool_use_id`,
@@ -312,17 +312,17 @@ Install it in `.claude/settings.json` (project) or `~/.claude/settings.json`
 ```json
 {
   "hooks": {
-    "PreToolUse":         [{ "matcher": "*", "hooks": [{ "type": "command", "command": "python3 /path/to/AgentLoupe/hooks/agentloupe_hook.py" }] }],
-    "PostToolUse":        [{ "matcher": "*", "hooks": [{ "type": "command", "command": "python3 /path/to/AgentLoupe/hooks/agentloupe_hook.py" }] }],
-    "PostToolUseFailure": [{ "matcher": "*", "hooks": [{ "type": "command", "command": "python3 /path/to/AgentLoupe/hooks/agentloupe_hook.py" }] }]
+    "PreToolUse":         [{ "matcher": "*", "hooks": [{ "type": "command", "command": "python3 /path/to/forkline/hooks/forkline_hook.py" }] }],
+    "PostToolUse":        [{ "matcher": "*", "hooks": [{ "type": "command", "command": "python3 /path/to/forkline/hooks/forkline_hook.py" }] }],
+    "PostToolUseFailure": [{ "matcher": "*", "hooks": [{ "type": "command", "command": "python3 /path/to/forkline/hooks/forkline_hook.py" }] }]
   }
 }
 ```
 
-The spans file is `$AGENTLOUPE_SPANS`, else
-`$AGENTLOUPE_CAPTURE_DIR/spans.jsonl`, else `/tmp/agentloupe/spans.jsonl`.
-Name it `<capture>.spans.jsonl` (e.g. `AGENTLOUPE_SPANS=run.spans.jsonl`
-next to `run.jsonl`) and `loupe-timeline` picks it up automatically;
+The spans file is `$FORKLINE_SPANS`, else
+`$FORKLINE_CAPTURE_DIR/spans.jsonl`, else `/tmp/forkline/spans.jsonl`.
+Name it `<capture>.spans.jsonl` (e.g. `FORKLINE_SPANS=run.spans.jsonl`
+next to `run.jsonl`) and `forkline-timeline` picks it up automatically;
 otherwise pass `--spans FILE`.
 
 Correlation (report `harness` section): a harness call is the pre→post
@@ -500,8 +500,8 @@ closing `session_end`. `session_end` carries a `reason`:
 | `orphan_timeout` | Tracked processes were still alive when `--orphan-timeout` expired after the root exit. The event lists their TGIDs in `still_running`; later events from them are dropped as stragglers, and the session does not reopen. |
 
 `--orphan-timeout` (default `3m`, `0` = wait indefinitely) bounds how
-long a session may outlive its root. `loupe-timeline` and
-`loupe-scorecard` report the gap between `root_exit` and `session_end`
+long a session may outlive its root. `forkline-timeline` and
+`forkline-scorecard` report the gap between `root_exit` and `session_end`
 (the orphan window), the end reason, and any still-running TGIDs.
 
 #### Per-process CPU and peak memory on `exit` / `root_exit` (ABI v4)
@@ -519,7 +519,7 @@ gone before any `/proc` sampling could see them have numbers:
 
 These complement — not replace — the `cpu_user_ms`/`cpu_sys_ms` on
 `session_end`, which remain the session **root's** totals sampled from
-`/proc` and say nothing about child tools. `loupe-scorecard` reports the
+`/proc` and say nothing about child tools. `forkline-scorecard` reports the
 `session_end` figure when there is one; when there is not (e.g. the
 capture stopped before the session closed) it falls back to the sum of
 every exited process's exit CPU (a `root_exit` counts only if the root's
@@ -577,8 +577,8 @@ list and the "fallbacks active" line in the log.
 Verify nothing is left behind after exit (dev-mode guarantee):
 
 ```sh
-sudo bpftool prog show | grep -i agentloupe   # expect: nothing
-sudo bpftool map show  | grep -i agentloupe   # expect: nothing
+sudo bpftool prog show | grep -i forkline   # expect: nothing
+sudo bpftool map show  | grep -i forkline   # expect: nothing
 ```
 
 ## Testing
@@ -611,9 +611,9 @@ Three layers, deliberately kept separate:
 | Environment | Mode | Result |
 |---|---|---|
 | Ubuntu, kernel 7.0.0-42-generic, Go 1.26.8, clang 21.1.8, kernel BTF present, `bpf` in `/sys/kernel/security/lsm` | LSM, full requested probe set | `make test` pass, `sudo make integration` **PASS**, 2026-10-28 |
-| Same host | LSM, `--catalog-only claude-code` under plain `sudo` | Catalog resolved the per-user install (`SUDO_USER` home), adopted 1 already-running Claude Code process tree, 29,035 events in 87s with zero ring-buffer drops / lost counters, reduced with `loupe-scorecard`, 2026-10-29 |
-| Same host | LSM, `--config configs/loupe-demo.yaml --enable-syscall-summary` | Adopted an already-running Claude Code tree (child `gh` attributed per-program) alongside 2× `loupe_demo.py` sessions; 392 events / 75 syscall_summary in 120s, zero ring-buffer drops or lost counters; `root_exit` + `session_end` (`all_exited`) verified live; reduced with loupe-scorecard and loupe-timeline (text + HTML), 2026-10-30 |
-| Same host | Tracepoint fallback, `--force-tracepoint-mode` (`FORCE_TP=1 make demo`) | Fallback probe set (`handle_exec_tp`, `handle_file_sys_enter/exit`) loaded and attached; adopted Claude Code tree plus 2× `loupe_demo.py` sessions with correct file/net attribution at raw-arg path fidelity, zero ring-buffer drops; `root_exit` + `session_end` (`all_exited`) verified, 2026-10-30 |
+| Same host | LSM, `--catalog-only claude-code` under plain `sudo` | Catalog resolved the per-user install (`SUDO_USER` home), adopted 1 already-running Claude Code process tree, 29,035 events in 87s with zero ring-buffer drops / lost counters, reduced with `forkline-scorecard`, 2026-10-29 |
+| Same host | LSM, `--config configs/forkline-demo.yaml --enable-syscall-summary` | Adopted an already-running Claude Code tree (child `gh` attributed per-program) alongside 2× `forkline_demo.py` sessions; 392 events / 75 syscall_summary in 120s, zero ring-buffer drops or lost counters; `root_exit` + `session_end` (`all_exited`) verified live; reduced with forkline-scorecard and forkline-timeline (text + HTML), 2026-10-30 |
+| Same host | Tracepoint fallback, `--force-tracepoint-mode` (`FORCE_TP=1 make demo`) | Fallback probe set (`handle_exec_tp`, `handle_file_sys_enter/exit`) loaded and attached; adopted Claude Code tree plus 2× `forkline_demo.py` sessions with correct file/net attribution at raw-arg path fidelity, zero ring-buffer drops; `root_exit` + `session_end` (`all_exited`) verified, 2026-10-30 |
 | Same host | LSM (integration + `make demo`) and tracepoint fallback (`FORCE_TP=1 make demo`), ABI v4 | Per-process CPU / peak RSS on `exit`/`root_exit` verified live in both modes: `sudo make integration` **PASS** (all 4 tests, zero ring-buffer drops); demo `exit` events carried plausible values in both modes (e.g. `echo` cpu 0–2ms / RSS ≈3.5 MB, `python3` cpu ≈20–30ms / RSS ≈3.7 MB), zero ring-buffer drops, 2026-10-30 |
 
 Not yet tested on a live kernel:
@@ -654,9 +654,9 @@ and file paths still use `bpf_d_path` (`"path_src": "d_path"`).
 
 ```
 bpf/            eBPF C (single TU) + shared ABI header
-cmd/agentloupe/ loader entrypoint (flags, signals, --max-runtime)
-cmd/loupe-scorecard/ per-session totals from a capture
-cmd/loupe-timeline/  per-session timeline + breakdown + tool spans (text / JSON / HTML)
+cmd/forkline/ loader entrypoint (flags, signals, --max-runtime)
+cmd/forkline-scorecard/ per-session totals from a capture
+cmd/forkline-timeline/  per-session timeline + breakdown + tool spans (text / JSON / HTML)
 hooks/          Claude Code tool-call hook (harness spans) + settings example
 internal/app/   loader: feature probe, attach, maps, events, housekeeping
 internal/config/ agents.yaml parsing

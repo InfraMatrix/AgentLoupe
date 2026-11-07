@@ -316,8 +316,8 @@ func hookCapture(withMeta bool) (*capBuilder, func(realOffsetMs float64, mono bo
 	c.ev(0, "session_start", 1000, 1, "claude", nil)
 	c.ev(0, "exec", 1000, 1, "claude", map[string]any{"argv": []string{"claude"}})
 	hook := func(ms float64, pid uint32) {
-		c.spawn(ms, 1000, 1, pid, "/bin/sh", "-c", "python3 /opt/AgentLoupe/hooks/agentloupe_hook.py")
-		c.ev(ms+1, "exec", pid, 1000, "python3", map[string]any{"argv": []string{"python3", "/opt/AgentLoupe/hooks/agentloupe_hook.py"}})
+		c.spawn(ms, 1000, 1, pid, "/bin/sh", "-c", "python3 /opt/forkline/hooks/forkline_hook.py")
+		c.ev(ms+1, "exec", pid, 1000, "python3", map[string]any{"argv": []string{"python3", "/opt/forkline/hooks/forkline_hook.py"}})
 		c.exit(ms+30, pid, 1000, 10, 5, 9000)
 	}
 	// Bash call: pre hook at 1000ms, shell 1040..1900, post hook 1950.
@@ -461,7 +461,7 @@ func TestHarnessClockUncorrectedOffsetIsDetectable(t *testing.T) {
 	c, spans := hookCapture(false)
 	var kept []string
 	for _, l := range c.lines {
-		if !strings.Contains(l, "agentloupe_hook") {
+		if !strings.Contains(l, "forkline_hook") {
 			kept = append(kept, l)
 		}
 	}
