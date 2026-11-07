@@ -1,0 +1,568 @@
+#!/usr/bin/env bash
+# agent-session: choose which credentials and model the coding agent
+# (Claude Code) runs with, for the real-agent demo and for your own runs
+# under the loader.
+#
+#   scripts/agent-session list          what credentials are available
+#   scripts/agent-session pick          choose credentials + model, save the choice
+#   scripts/agent-session show          the saved choice, checked live
+#   scripts/agent-session run [-- ARGS] start claude with the choice (asks first);
+#                                       start the loader with
+#                                       --catalog-only claude-code and it
+#                                       adopts this claude
+#
+# examples/real-agent/run.sh sources this file and uses the same functions.
+#
+# Two kinds of credentials are in play, and they are kept apart:
+#
+#   AGENT_*             the coding agent under observation (Claude Code):
+#                       what its run bills to. Chosen here.
+#   META_MODEL_API_KEY  AgentCutter's analysis model (scripts/make_canned.py).
+#                       Never handed to the agent: it runs Bash, so anything
+#                       in its environment is one `env` away.
+#
+# Credential candidates (each has an id):
+#
+#   login            the default claude login (~/.claude), if signed in
+#   profile:<name>   another Claude config dir with its own login (a second
+#                    subscription): ~/.claude-<name>, or a <dir>/<name>.profile
+#                    file whose first line is the config dir's path. Create
+#                    one with: CLAUDE_CONFIG_DIR=~/.claude-<name> claude auth login
+#   oauth:<name>     <dir>/<name>.oauth, a long-lived subscription token from
+#                    `claude setup-token`
+#   key:<name>       <dir>/<name>.key, an Anthropic API key
+#   env:AGENT_API_KEY_FILE / env:AGENT_API_KEY
+#                    an agent key given for this run
+#   env:ANTHROPIC_API_KEY
+#                    a key that happens to be in your shell; listed, but never
+#                    picked without asking (it may be there for something else)
+#
+#   <dir> = AGENT_CREDENTIALS_DIR (default ~/.config/agentloupe/agent-credentials);
+#   keep its files mode 600.
+#
+# Which choice wins (credentials / model):
+#   1. AGENT_AUTH=<id> / AGENT_MODEL=<alias|id>   for this run
+#      (AGENT_API_KEY_FILE / AGENT_API_KEY also count as choosing a key)
+#   2. the saved choice from `pick` (AGENT_SESSION_FILE, default
+#      ~/.config/agentloupe/agent-session: ids only, never secrets)
+#   3. a menu (or, for credentials, the only candidate)
+# Then it ALWAYS asks "are these right?" before anything runs; answering no
+# prints how to set the credentials you want. Without a terminal it refuses
+# unless AGENT_CONFIRM=1. AGENT_AUTH=list prints the candidates and exits.
+#
+# Model: chosen from what the chosen credentials can use. For an API key the
+# list comes from that key's own service (GET /v1/models, ANTHROPIC_BASE_URL
+# if set; the key is sent nowhere else). Subscription logins and setup-tokens
+# cannot be listed (Claude Code has no command for it): pick "default" (the
+# account's default) or type a model id; a model the plan lacks fails at the
+# start of the run.
+#
+# The chosen credential is exported only into the claude process, after
+# clearing everything else that could decide who pays (other keys, OAuth
+# tokens, Bedrock/Vertex/Foundry switches, CLAUDE_CONFIG_DIR) and the analysis
+# key. Secrets never go on a command line (the capture records argv, not envp).
+
+AA_DIR="${AGENT_CREDENTIALS_DIR:-$HOME/.config/agentloupe/agent-credentials}"
+AS_FILE="${AGENT_SESSION_FILE:-$HOME/.config/agentloupe/agent-session}"
+AA_CLAUDE="${CLAUDE_BIN:-claude}"
+AS_AVAILABLE=()  # models the chosen credentials' service offers (API keys only)
+AS_LIST_NOTE=""  # why there is no list, when there is none
+
+# Everything that can decide who Claude Code bills, plus the analysis key.
+AA_CLEAR_VARS=(ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN CLAUDE_CODE_OAUTH_TOKEN
+  CLAUDE_CODE_USE_BEDROCK CLAUDE_CODE_USE_VERTEX CLAUDE_CODE_USE_FOUNDRY
+  CLAUDE_CONFIG_DIR META_MODEL_API_KEY)
+
+AA_IDS=() AA_KINDS=() AA_SRCS=() AA_METHODS=() AA_LABELS=()
+# The selection:
+AA_ID="" AA_KIND="" AA_METHOD="" AA_SECRET="" AA_PROFILE="" AA_DESC="" AA_FROM=""
+AS_MODEL="" AS_MODEL_FROM="" AS_MODEL_ARGS=()
+AS_CONFIRM_EXTRA=() # extra summary lines a caller wants shown in the confirmation
+
+_aa_note() { printf 'agent-session: %s\n' "$*" >&2; }
+_aa_die()  { printf 'agent-session: ERROR: %s\n' "$*" >&2; exit 1; }
+_aa_add()  { AA_IDS+=("$1"); AA_KINDS+=("$2"); AA_SRCS+=("$3"); AA_METHODS+=("$4"); AA_LABELS+=("$5"); }
+
+# First line of a file, trimmed; fails if empty or unreadable.
+_aa_read_first() {
+  local line=""
+  [ -r "$1" ] || return 1
+  IFS= read -r line <"$1" || [ -n "$line" ] || return 1
+  line="${line#"${line%%[![:space:]]*}"}"; line="${line%"${line##*[![:space:]]}"}"
+  [ -n "$line" ] || return 1
+  printf '%s' "$line"
+}
+
+_aa_check_perms() {
+  local mode
+  mode="$(stat -c %a "$1" 2>/dev/null)" || return 0
+  case "$mode" in 600|400) ;; *) _aa_note "WARNING: $1 is mode $mode (should be 600)";; esac
+}
+
+# `claude auth status` for a config dir ("" = default) with every other
+# credential cleared. Prints "<authMethod>\t<label>", or "-" if not signed in.
+# stdin is /dev/null so it cannot eat what the user types into a menu, and
+# its exit status is ignored (non-zero when signed out).
+_aa_status() {
+  ( for v in "${AA_CLEAR_VARS[@]}"; do unset "$v"; done
+    if [ -n "$1" ]; then export CLAUDE_CONFIG_DIR="$1"; fi
+    "$AA_CLAUDE" auth status --json </dev/null 2>/dev/null || true ) | python3 -I -c '
+import json, sys
+try:
+    d = json.load(sys.stdin)
+except Exception:
+    print("-"); sys.exit()
+if not d.get("loggedIn"):
+    print("-"); sys.exit()
+m = d.get("authMethod") or "?"
+label = "subscription " + (d.get("subscriptionType") or "?") if m == "claude.ai" else m
+who = d.get("email") or d.get("orgName")
+print(m + "\t" + label + (" (" + who + ")" if who else ""))'
+}
+
+_aa_add_login() { # id kind config-dir
+  local st method label
+  st="$(_aa_status "$3")"
+  if [ "$st" = "-" ]; then
+    _aa_note "skipping $1: not signed in${3:+ ($3)}"
+    return
+  fi
+  IFS=$'\t' read -r method label <<<"$st"
+  _aa_add "$1" "$2" "$3" "$method" "$label${3:+ [$3]}"
+}
+
+_aa_key_label() { printf 'API key ...%s' "${1: -4}"; }
+
+agent_auth_discover() {
+  local d f name path secret
+  _aa_add_login login login ""
+
+  for d in "$HOME"/.claude-*/; do
+    [ -d "$d" ] || continue
+    d="${d%/}"
+    _aa_add_login "profile:${d##*/.claude-}" profile "$d"
+  done
+
+  if [ -d "$AA_DIR" ]; then
+    for f in "$AA_DIR"/*.profile; do
+      [ -e "$f" ] || continue
+      name="$(basename "$f" .profile)"
+      path="$(_aa_read_first "$f")" || { _aa_note "skipping $f: empty"; continue; }
+      path="${path/#\~/$HOME}"
+      [ -d "$path" ] || { _aa_note "skipping $f: $path is not a directory"; continue; }
+      _aa_add_login "profile:$name" profile "$path"
+    done
+    for f in "$AA_DIR"/*.oauth; do
+      [ -e "$f" ] || continue
+      _aa_check_perms "$f"
+      _aa_add "oauth:$(basename "$f" .oauth)" oauth "$f" oauth_token "subscription token (claude setup-token)"
+    done
+    for f in "$AA_DIR"/*.key; do
+      [ -e "$f" ] || continue
+      _aa_check_perms "$f"
+      secret="$(_aa_read_first "$f")" || { _aa_note "skipping $f: empty"; continue; }
+      _aa_add "key:$(basename "$f" .key)" key "$f" api_key "$(_aa_key_label "$secret")"
+    done
+  fi
+
+  if [ -n "${AGENT_API_KEY_FILE:-}" ]; then
+    secret="$(_aa_read_first "$AGENT_API_KEY_FILE")" \
+      || _aa_die "AGENT_API_KEY_FILE is empty or unreadable: $AGENT_API_KEY_FILE"
+    _aa_add env:AGENT_API_KEY_FILE key "$AGENT_API_KEY_FILE" api_key "$(_aa_key_label "$secret") from $AGENT_API_KEY_FILE"
+  fi
+  if [ -n "${AGENT_API_KEY:-}" ]; then
+    _aa_add env:AGENT_API_KEY key env:AGENT_API_KEY api_key "$(_aa_key_label "$AGENT_API_KEY")"
+  fi
+  if [ -n "${ANTHROPIC_API_KEY:-}" ]; then
+    _aa_add env:ANTHROPIC_API_KEY key env:ANTHROPIC_API_KEY api_key \
+      "$(_aa_key_label "$ANTHROPIC_API_KEY") in your shell (not necessarily meant for the agent)"
+  fi
+}
+
+agent_auth_list() {
+  local i
+  if [ ${#AA_IDS[@]} -eq 0 ]; then
+    echo "  (none found)"
+    return
+  fi
+  for i in "${!AA_IDS[@]}"; do
+    printf '  %2d) %-24s %s\n' "$((i + 1))" "${AA_IDS[$i]}" "${AA_LABELS[$i]}"
+  done
+}
+
+_aa_index_of() { # id -> index on stdout, or fail
+  local i
+  for i in "${!AA_IDS[@]}"; do
+    if [ "${AA_IDS[$i]}" = "$1" ]; then echo "$i"; return 0; fi
+  done
+  return 1
+}
+
+_aa_take() { # index: load the selection and its secret
+  local i="$1" src
+  AA_ID="${AA_IDS[$i]}" AA_KIND="${AA_KINDS[$i]}" AA_METHOD="${AA_METHODS[$i]}"
+  AA_SECRET="" AA_PROFILE=""
+  src="${AA_SRCS[$i]}"
+  case "$AA_KIND" in
+    login) ;;
+    profile) AA_PROFILE="$src" ;;
+    oauth|key)
+      case "$src" in
+        env:*) src="${src#env:}"; AA_SECRET="${!src}" ;;
+        *) AA_SECRET="$(_aa_read_first "$src")" || _aa_die "cannot read $src" ;;
+      esac
+      [ -n "$AA_SECRET" ] || _aa_die "$AA_ID is empty"
+      ;;
+  esac
+  AA_DESC="$AA_ID: ${AA_LABELS[$i]}"
+}
+
+_aa_ids_csv() { local IFS=,; printf '%s' "${AA_IDS[*]}"; }
+
+_as_load_saved() { # sets AS_SAVED_AUTH / AS_SAVED_MODEL (file is parsed, never sourced)
+  local k v
+  AS_SAVED_AUTH="" AS_SAVED_MODEL=""
+  [ -r "$AS_FILE" ] || return 0
+  while IFS='=' read -r k v || [ -n "$k" ]; do
+    case "$k" in
+      auth) AS_SAVED_AUTH="$v" ;;
+      model) AS_SAVED_MODEL="$v" ;;
+    esac
+  done <"$AS_FILE"
+}
+
+# An alias or model id, optionally with a bracketed suffix such as [1m].
+AS_MODEL_RE='^[A-Za-z0-9][A-Za-z0-9._:@/-]*(\[[A-Za-z0-9]+\])?$'
+_as_valid_model() { [[ "$1" =~ $AS_MODEL_RE ]]; }
+
+# Credential menu. $1 = 1 to offer typing a key in (not saveable, so `pick`
+# passes 0).
+_aa_menu() {
+  local n=${#AA_IDS[@]} max choice
+  echo "Which credentials should the coding agent (Claude Code) use?"
+  agent_auth_list
+  max=$n
+  if [ "$1" = 1 ]; then
+    max=$((n + 1))
+    printf '  %2d) %-24s %s\n' "$max" "(type a key)" "enter an Anthropic API key now (this run only)"
+  fi
+  [ "$max" -gt 0 ] || { agent_session_howto ""; exit 1; }
+  while :; do
+    read -rp "Choose [1-$max]: " choice || _aa_die "no choice made"
+    [[ "$choice" =~ ^[0-9]+$ ]] && [ "$choice" -ge 1 ] && [ "$choice" -le "$max" ] && break
+  done
+  if [ "$choice" -le "$n" ]; then
+    _aa_take $((choice - 1))
+  else
+    read -rsp "Anthropic API key: " AA_SECRET || true
+    echo
+    [ -n "$AA_SECRET" ] || _aa_die "no key entered"
+    AA_ID=prompt AA_KIND=key AA_METHOD=api_key AA_PROFILE=""
+    AA_DESC="prompt: $(_aa_key_label "$AA_SECRET") (typed in)"
+  fi
+  AA_FROM="chosen just now"
+}
+
+# Fills AS_AVAILABLE with the models the chosen credentials can use, asked of
+# that key's own service (GET /v1/models, at ANTHROPIC_BASE_URL if set).
+# Subscription logins and setup-tokens cannot be listed: Claude Code has no
+# command for it, so AS_LIST_NOTE says so and the menu offers default/typing.
+_as_list_models() {
+  local out line
+  AS_AVAILABLE=() AS_LIST_NOTE=""
+  if [ "$AA_KIND" != key ]; then
+    AS_LIST_NOTE="Claude Code cannot list the models of a ${AA_METHOD} login"
+    return
+  fi
+  # The key reaches python through its environment only (never argv).
+  out="$(AS_K="$AA_SECRET" AS_BASE="${ANTHROPIC_BASE_URL:-https://api.anthropic.com}" python3 -I -c '
+import json, os, sys, urllib.error, urllib.parse, urllib.request
+key, base = os.environ.pop("AS_K"), os.environ["AS_BASE"].rstrip("/")
+ids, after = [], None
+for _ in range(50):
+    q = {"limit": "100"}
+    if after:
+        q["after_id"] = after
+    req = urllib.request.Request(base + "/v1/models?" + urllib.parse.urlencode(q),
+                                 headers={"x-api-key": key, "anthropic-version": "2023-06-01"})
+    try:
+        d = json.load(urllib.request.urlopen(req, timeout=20))
+    except urllib.error.HTTPError as e:
+        print("ERR the service answered HTTP %d" % e.code); sys.exit()
+    except Exception as e:
+        print("ERR %s" % type(e).__name__); sys.exit()
+    ids += [m["id"] for m in d.get("data", []) if m.get("id")]
+    if not d.get("has_more"):
+        break
+    after = d.get("last_id")
+print("\n".join(ids) if ids else "ERR the service listed no models")
+' </dev/null 2>/dev/null)" || out="ERR could not run the listing"
+  if [[ "$out" == ERR* ]]; then
+    AS_LIST_NOTE="could not list models for $AA_ID: ${out#ERR }"
+    return
+  fi
+  while IFS= read -r line; do [ -n "$line" ] && AS_AVAILABLE+=("$line"); done <<<"$out"
+}
+
+_as_offered() { # model -> ok if offered (or nothing to check against)
+  local m
+  [ "$1" = default ] && return 0
+  [ ${#AS_AVAILABLE[@]} -eq 0 ] && return 0
+  for m in "${AS_AVAILABLE[@]}"; do [ "$m" = "$1" ] && return 0; done
+  return 1
+}
+
+_as_model_menu() {
+  local i choice n=${#AS_AVAILABLE[@]}
+  echo "Which model should the coding agent use?"
+  if [ "$n" -gt 0 ]; then
+    echo "  (offered for $AA_ID)"
+  else
+    echo "  ($AS_LIST_NOTE)"
+  fi
+  printf '  %2d) %-32s %s\n' 1 default "let Claude Code use the account's default"
+  for ((i = 0; i < n; i++)); do printf '  %2d) %s\n' "$((i + 2))" "${AS_AVAILABLE[$i]}"; done
+  printf '  %2d) %s\n' "$((n + 2))" "(type a model id)"
+  while :; do
+    read -rp "Choose [1-$((n + 2))]: " choice || _aa_die "no choice made"
+    [[ "$choice" =~ ^[0-9]+$ ]] && [ "$choice" -ge 1 ] && [ "$choice" -le $((n + 2)) ] && break
+  done
+  if [ "$choice" -eq 1 ]; then
+    AS_MODEL=default
+  elif [ "$choice" -le $((n + 1)) ]; then
+    AS_MODEL="${AS_AVAILABLE[$((choice - 2))]}"
+  else
+    read -rp "Model id: " AS_MODEL || _aa_die "no model entered"
+    _as_valid_model "$AS_MODEL" || _aa_die "not a model id: $AS_MODEL"
+  fi
+  AS_MODEL_FROM="chosen just now"
+}
+
+# Chooses credentials and model. $1 = run (env > saved > auto/menu) or
+# pick (always the menus, for saving).
+agent_session_choose() {
+  local mode="$1" want="${AGENT_AUTH:-}" from="" n=${#AA_IDS[@]} i
+  if [ "$want" = list ]; then
+    echo "Coding-agent credentials:"
+    agent_auth_list
+    exit 0
+  fi
+  _as_load_saved
+
+  # --- credentials
+  if [ "$mode" = run ]; then
+    if [ -n "$want" ]; then from="AGENT_AUTH"
+    elif [ -n "${AGENT_API_KEY_FILE:-}" ]; then want=env:AGENT_API_KEY_FILE from="AGENT_API_KEY_FILE"
+    elif [ -n "${AGENT_API_KEY:-}" ]; then want=env:AGENT_API_KEY from="AGENT_API_KEY"
+    elif [ -n "$AS_SAVED_AUTH" ]; then
+      if _aa_index_of "$AS_SAVED_AUTH" >/dev/null; then
+        want="$AS_SAVED_AUTH" from="saved in $AS_FILE"
+      else
+        _aa_note "the saved credentials '$AS_SAVED_AUTH' are not available any more; choose again"
+      fi
+    fi
+  fi
+  if [ -n "$want" ]; then
+    i="$(_aa_index_of "$want")" || {
+      _aa_note "$from=$want is not available (have: $(_aa_ids_csv))"
+      agent_session_howto ""
+      exit 1
+    }
+    _aa_take "$i"
+    AA_FROM="$from"
+  elif [ "$mode" = run ] && [ "$n" -eq 1 ] && [ "${AA_IDS[0]}" != env:ANTHROPIC_API_KEY ]; then
+    _aa_take 0
+    AA_FROM="the only credentials found"
+  elif [ -t 0 ]; then
+    _aa_menu "$([ "$mode" = run ] && echo 1 || echo 0)"
+  else
+    _aa_note "cannot choose credentials without a terminal; set AGENT_AUTH to one of: $(_aa_ids_csv)"
+    exit 1
+  fi
+  if [ "$AA_KIND" = key ] && [[ "$AA_SECRET" != sk-ant-* ]]; then
+    _aa_note "WARNING: $AA_ID does not start with sk-ant- (using it anyway)"
+  fi
+
+  # --- model: from what the chosen credentials can use
+  _as_list_models
+  AS_MODEL=""
+  if [ "$mode" = run ] && [ -n "${AGENT_MODEL:-}" ]; then
+    _as_offered "$AGENT_MODEL" || {
+      _aa_note "AGENT_MODEL=$AGENT_MODEL is not offered for $AA_ID (offered: ${AS_AVAILABLE[*]})"
+      agent_session_howto ""
+      exit 1
+    }
+    AS_MODEL="$AGENT_MODEL" AS_MODEL_FROM="AGENT_MODEL"
+  elif [ "$mode" = run ] && [ -n "$AS_SAVED_MODEL" ]; then
+    if _as_offered "$AS_SAVED_MODEL"; then
+      AS_MODEL="$AS_SAVED_MODEL" AS_MODEL_FROM="saved in $AS_FILE"
+    else
+      _aa_note "the saved model '$AS_SAVED_MODEL' is not offered for $AA_ID any more; choose again"
+    fi
+  fi
+  if [ -n "$AS_MODEL" ]; then
+    :
+  elif [ -t 0 ]; then
+    _as_model_menu
+  else
+    AS_MODEL=default AS_MODEL_FROM="no terminal to ask; AGENT_MODEL not set"
+  fi
+  if [ ${#AS_AVAILABLE[@]} -eq 0 ] && [ "$AS_MODEL" != default ] && [ "$AS_MODEL_FROM" != "chosen just now" ]; then
+    AS_MODEL_FROM+="; not checked: $AS_LIST_NOTE"
+  fi
+  _as_valid_model "$AS_MODEL" || _aa_die "not a model id: $AS_MODEL"
+  AS_MODEL_ARGS=()
+  [ "$AS_MODEL" = default ] || AS_MODEL_ARGS=(--model "$AS_MODEL")
+
+  # Nothing after this point (build, loader, AgentCutter) sees agent keys.
+  unset ANTHROPIC_API_KEY AGENT_API_KEY
+}
+
+# Call inside the subshell that runs claude. Builtins only: no secret in argv.
+agent_auth_apply() {
+  local v
+  for v in "${AA_CLEAR_VARS[@]}"; do unset "$v"; done
+  case "$AA_KIND" in
+    profile) export CLAUDE_CONFIG_DIR="$AA_PROFILE" ;;
+    oauth)   export CLAUDE_CODE_OAUTH_TOKEN="$AA_SECRET" ;;
+    key)     export ANTHROPIC_API_KEY="$AA_SECRET" ;;
+  esac
+}
+
+# Ask claude (offline) which method it will use with that environment; stop
+# if it is not the one chosen (or the login has lapsed).
+agent_auth_verify() {
+  local got
+  got="$( agent_auth_apply
+          { "$AA_CLAUDE" auth status --json </dev/null 2>/dev/null || true; } \
+            | python3 -I -c 'import json,sys
+try:
+    d = json.load(sys.stdin)
+    print((d.get("authMethod") or "?") if d.get("loggedIn") else "not signed in")
+except Exception: print("?")' )"
+  if [ "$got" != "$AA_METHOD" ]; then
+    _aa_note "claude would authenticate with '$got', not the chosen $AA_ID ($AA_METHOD)"
+    agent_session_howto ""
+    exit 1
+  fi
+}
+
+# How to get the credentials you want. $1 = the command to rerun.
+agent_session_howto() {
+  local rerun="${1:-${AS_RERUN:-make real-agent}}" d="$AA_DIR"
+  [[ "$d" == "$HOME"/* ]] && d="~${d#"$HOME"}"
+  cat >&2 <<EOF
+
+To run the coding agent with the credentials you want:
+
+  Credentials found on this machine:
+$(agent_auth_list)
+
+  Use one of them for this run:   AGENT_AUTH=<id> $rerun
+  Save one as the default:        scripts/agent-session pick
+  Use an API key for this run:    AGENT_API_KEY_FILE=/path/to/key $rerun
+
+  Add credentials, then they appear in the list above:
+    API key        install -D -m 600 /path/to/key $d/<name>.key      -> key:<name>
+    subscription   CLAUDE_CONFIG_DIR=~/.claude-<name> claude auth login     -> profile:<name>
+    setup-token    claude setup-token, then paste it into:
+                   (umask 077; mkdir -p $d; cat > $d/<name>.oauth)  -> oauth:<name>
+
+  Different model:                AGENT_MODEL=<default|model id> $rerun   (see what is offered: scripts/agent-session show)
+  Check before running:           scripts/agent-session show
+EOF
+}
+
+# Shows the choice and asks. Anything but yes prints how to change it and
+# exits. $1 = the command to rerun (for the instructions).
+agent_session_confirm() {
+  local rerun="$1" answer line
+  AS_RERUN="$rerun"
+  echo
+  echo "The coding agent (Claude Code) will run with:"
+  printf '  credentials  %s\n' "$AA_DESC"
+  printf '               (%s; claude auth status agrees)\n' "${AA_FROM:-?}"
+  printf '  model        %s   (%s)\n' "$AS_MODEL" "${AS_MODEL_FROM:-?}"
+  for line in "${AS_CONFIRM_EXTRA[@]}"; do printf '  %s\n' "$line"; done
+  if [ "${AGENT_CONFIRM:-0}" = 1 ]; then
+    echo "  (confirmed by AGENT_CONFIRM=1)"
+    return 0
+  fi
+  if [ ! -t 0 ]; then
+    _aa_note "no terminal to ask whether these are right; run from a terminal, or set AGENT_CONFIRM=1"
+    agent_session_howto "$rerun"
+    exit 1
+  fi
+  read -rp "Are these the right credentials and model? [y/N] " answer || answer=""
+  case "$answer" in
+    y|Y|yes|YES|Yes) return 0 ;;
+  esac
+  echo "Not starting." >&2
+  agent_session_howto "$rerun"
+  exit 1
+}
+
+agent_session_save() {
+  [ "$AA_ID" != prompt ] || _aa_die "a typed-in key cannot be saved; add it as a key file (see below)"
+  ( umask 077; mkdir -p "$(dirname "$AS_FILE")"
+    printf 'auth=%s\nmodel=%s\n' "$AA_ID" "$AS_MODEL" >"$AS_FILE" )
+  echo "Saved to $AS_FILE (ids only, no secrets)."
+}
+
+agent_session_main() {
+  set -euo pipefail
+  local cmd="${1:-list}"
+  shift || true
+  case "$cmd" in
+    list)
+      agent_auth_discover
+      echo "Coding-agent credentials (use one with AGENT_AUTH=<id>):"
+      agent_auth_list
+      ;;
+    pick)
+      agent_auth_discover
+      agent_session_choose pick
+      agent_auth_verify
+      agent_session_save
+      ;;
+    show)
+      _as_load_saved
+      if [ -z "$AS_SAVED_AUTH" ]; then
+        echo "Nothing saved yet ($AS_FILE). Choose with: scripts/agent-session pick"
+        exit 0
+      fi
+      agent_auth_discover
+      AGENT_AUTH="${AGENT_AUTH:-}" agent_session_choose run </dev/null
+      agent_auth_verify
+      echo "credentials  $AA_DESC   ($AA_FROM; claude auth status agrees)"
+      echo "model        $AS_MODEL   ($AS_MODEL_FROM)"
+      if [ ${#AS_AVAILABLE[@]} -gt 0 ]; then
+        echo "offered      ${AS_AVAILABLE[*]}"
+      else
+        echo "offered      ($AS_LIST_NOTE)"
+      fi
+      ;;
+    run)
+      [ "${1:-}" = "--" ] && shift
+      if [ -n "${CLAUDECODE:-}" ]; then
+        _aa_note "WARNING: inside a Claude Code session; this claude will be folded into it in the capture"
+      fi
+      agent_auth_discover
+      agent_session_choose run
+      agent_auth_verify
+      agent_session_confirm "scripts/agent-session run -- ${*:-}"
+      agent_auth_apply
+      exec "$AA_CLAUDE" "${AS_MODEL_ARGS[@]}" "$@"
+      ;;
+    -h|--help|help)
+      sed -n '2,/^$/p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+      ;;
+    *)
+      _aa_die "unknown command '$cmd' (list, pick, show, run, help)"
+      ;;
+  esac
+}
+
+if [ "${BASH_SOURCE[0]}" = "$0" ]; then
+  agent_session_main "$@"
+fi

@@ -133,7 +133,30 @@ predecessors: 4 tests fail), installs the hook in the clone's
 `.claude/settings.json`, and runs `claude -p` under the loader
 (`--catalog-only claude-code`, syscall summary, io accounting, net
 send/recv events) with a prompt to set up a venv, fix the bug without
-touching tests, and run the full suite. Run it from a plain terminal:
+touching tests, and run the full suite.
+
+Credentials come in two kinds that the demo keeps apart. **Coding-agent
+credentials** (`AGENT_*`) decide what the observed Claude Code run bills
+to: the default `claude` login, other logged-in profiles (`~/.claude-<name>`,
+a second subscription), `claude setup-token` tokens, or API keys
+(`~/.config/agentloupe/agent-credentials/<name>.{key,oauth,profile}`,
+`AGENT_API_KEY_FILE`, `AGENT_API_KEY`). `AGENT_AUTH=list` shows what is
+available, `AGENT_AUTH=<id>` picks one, and with several available and
+no choice the script shows a menu. The model is then chosen from what
+those credentials can use: for an API key, the list its own service
+returns (`/v1/models`); subscription logins cannot be listed, so the menu
+offers the account default or a typed id (`AGENT_MODEL=<id>` skips it).
+`scripts/agent-session pick` saves a credentials + model choice ahead of
+time (ids only), `show` checks it, and `run -- [args]` starts your own
+`claude` with it for runs under the loader.
+
+Before anything is built, the demo shows the credentials and model and
+asks whether they are right; answering no prints how to set the ones you
+want (without a terminal it needs `AGENT_CONFIRM=1`). The credentials are
+checked with `claude auth status` then and again right before the agent
+starts, and the choice is recorded in `out/agent-session.txt` (no secret).
+The **analysis-model key** (`META_MODEL_API_KEY`, AgentCutter) is only used
+by `SAVE_CANNED=1` and is never passed to the agent. Run it from a plain terminal:
 sudo needs the TTY, and a `claude` started from inside another tracked
 Claude Code session would be folded into that session. `SAVE_CANNED=1`
 also refreshes `examples/canned/` through `scripts/make_canned.py`,
